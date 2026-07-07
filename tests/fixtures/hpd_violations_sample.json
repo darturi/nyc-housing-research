@@ -1,0 +1,31 @@
+[
+  {
+    "violationid": "1001",
+    "buildingid": "2001",
+    "registrationid": "3001",
+    "boro": "MANHATTAN",
+    "housenumber": "123",
+    "streetname": "MAIN STREET",
+    "zip": "10001",
+    "apartment": "1A",
+    "class": "C",
+    "inspectiondate": "2026-01-01T00:00:00.000",
+    "novdescription": "Paint/plaster defect",
+    "currentstatus": "Open",
+    "currentstatusdate": "2026-01-02T00:00:00.000"
+  },
+  {
+    "violationid": "1002",
+    "buildingid": "2002",
+    "registrationid": "3002",
+    "boro": "BROOKLYN",
+    "housenumber": "456",
+    "streetname": "SIDE STREET",
+    "zip": "11201",
+    "class": "B",
+    "inspectiondate": "2026-01-03T00:00:00.000",
+    "novdescription": "Door defect",
+    "currentstatus": "Open"
+  }
+]
+

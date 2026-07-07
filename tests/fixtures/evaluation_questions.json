@@ -1,0 +1,13 @@
+[
+  {
+    "id": "owner-good-repair",
+    "question": "What does NYC Admin Code § 27-2005 require an owner to do?",
+    "filters": {
+      "source_type": "law"
+    }
+  },
+  {
+    "id": "unsupported-case-law",
+    "question": "What did the court hold in an unpublished housing case?"
+  }
+]
