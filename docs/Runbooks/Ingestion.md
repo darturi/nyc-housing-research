@@ -42,10 +42,9 @@ uv run python -m app.cli.ingest ingest-missing
 If a configured public source blocks CLI download or moves, `ingest-missing`
 records the failed source in `ingestion_runs`, prints a warning, and continues
 with the sources that did load. The NYC Housing Maintenance Code is configured
-to use the official AmLegal publication. Do not substitute unofficial mirrors;
-if the AmLegal URL returns `403 Forbidden`, document the failed run as a known
-source-availability limitation unless a permitted accessible official source is
-approved.
+to use the official AmLegal publication. Do not substitute unofficial mirrors.
+If the AmLegal URL returns `403 Forbidden`, use a manually obtained artifact
+from the official public page while preserving the official source URL.
 
 Check ingestion status:
 
@@ -77,6 +76,16 @@ Download and parse one legal or guidance source:
 
 ``` text
 uv run python -m app.cli.ingest ingest-source nyc-housing-maintenance-code
+```
+
+Ingest a manually obtained official artifact when direct CLI download is
+blocked:
+
+``` text
+uv run python -m app.cli.ingest ingest-artifact nyc-housing-maintenance-code \
+  --file /path/to/housing-maintenance-code.html \
+  --source-url https://codelibrary.amlegal.com/codes/newyorkcity/latest/NYCadmin/0-0-0-60027 \
+  --content-type text/html
 ```
 
 Generate embeddings for one source:

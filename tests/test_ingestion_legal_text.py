@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.db.session import SessionLocal
 from app.ingestion.downloaders import (
     DownloadedArtifact,
@@ -169,3 +171,33 @@ def test_parse_legal_document_is_idempotent(tmp_path):
         assert db.query(Section).count() == 2
         assert db.query(Chunk).count() == 2
         assert db.query(Citation).count() == 2
+
+
+def test_parse_law_source_rejects_uncited_full_text(tmp_path):
+    from app.core.config import get_settings
+
+    get_settings().artifact_storage_path = str(tmp_path)
+    content = "This public law artifact did not expose section headings."
+    artifact = DownloadedArtifact(
+        content=content.encode("utf-8"),
+        content_hash=hash_bytes(content.encode("utf-8")),
+        content_type="text/plain",
+        byte_size=len(content.encode("utf-8")),
+        extension="txt",
+        source_url="https://example.com/hmc.txt",
+    )
+    with SessionLocal() as db:
+        seed_sources(db)
+        source = (
+            db.query(Source)
+            .filter(Source.slug == "nyc-housing-maintenance-code")
+            .one()
+        )
+        source_version = create_or_get_source_version(db, source, artifact)
+
+        with pytest.raises(ValueError, match="citation-bearing law sections"):
+            parse_legal_document(db, source, source_version, content)
+
+        assert db.query(Document).count() == 0
+        assert db.query(Section).count() == 0
+        assert db.query(Chunk).count() == 0

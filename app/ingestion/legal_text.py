@@ -253,11 +253,18 @@ def parse_legal_document(
     source_version: SourceVersion,
     raw_text: str,
 ) -> tuple[int, int, int]:
+    parsed_sections = split_sections(raw_text, source.slug)
+    if source.source_type == "law" and any(
+        section.citation is None for section in parsed_sections
+    ):
+        raise ValueError(
+            f"{source.slug} did not split into citation-bearing law sections."
+        )
     document, document_created = upsert_document(db, source, source_version)
     created = 1 if document_created else 0
     updated = 0
     skipped = 0
-    for parsed_section in split_sections(raw_text, source.slug):
+    for parsed_section in parsed_sections:
         section = db.scalar(
             select(Section).where(
                 Section.document_id == document.id,

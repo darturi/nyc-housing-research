@@ -1,12 +1,20 @@
 import argparse
 import json
 import sys
+from mimetypes import guess_type
+from pathlib import Path
 
 from sqlalchemy import func, or_, select
 
 from app.db.session import SessionLocal
 from app.ingestion.artifacts import artifact_exists, read_artifact
-from app.ingestion.downloaders import create_or_get_source_version, download_url
+from app.ingestion.downloaders import (
+    DownloadedArtifact,
+    create_or_get_source_version,
+    download_url,
+    extension_from_content_type,
+    hash_bytes,
+)
 from app.ingestion.hpd_violations import upsert_hpd_violations
 from app.ingestion.legal_text import artifact_bytes_to_text, parse_legal_document
 from app.ingestion.registry import get_source_by_slug, seed_sources
@@ -105,6 +113,81 @@ def ingest_source_command(source_slug: str) -> None:
     source_version = download_source_command(source_slug)
     parse_source_command(source_slug)
     print(f"Ingested {source_slug} at version {source_version.content_hash}.")
+
+
+def local_file_artifact(
+    file_path: str,
+    source_url: str,
+    content_type: str | None,
+) -> DownloadedArtifact:
+    if not source_url.startswith("https://"):
+        raise ValueError("source-url must be a public HTTPS URL.")
+    path = Path(file_path)
+    if not path.is_file():
+        raise ValueError(f"Artifact file not found: {file_path}")
+    resolved_content_type = content_type or guess_type(path.name)[0]
+    content = path.read_bytes()
+    extension = extension_from_content_type(resolved_content_type, source_url)
+    if extension == "bin" and path.suffix:
+        extension = path.suffix.lstrip(".").lower()
+    return DownloadedArtifact(
+        content=content,
+        content_hash=hash_bytes(content),
+        content_type=resolved_content_type,
+        byte_size=len(content),
+        extension=extension,
+        source_url=source_url,
+    )
+
+
+def ingest_artifact_command(
+    source_slug: str,
+    file_path: str,
+    source_url: str,
+    content_type: str | None,
+) -> None:
+    with SessionLocal() as db:
+        source = get_source_by_slug(db, source_slug)
+
+        def operation():
+            artifact = local_file_artifact(file_path, source_url, content_type)
+            existing_source_version = db.scalar(
+                select(SourceVersion).where(
+                    SourceVersion.source_id == source.id,
+                    SourceVersion.content_hash == artifact.content_hash,
+                )
+            )
+            source_version = create_or_get_source_version(db, source, artifact)
+            created = 0 if existing_source_version is not None else 1
+            updated = 0
+            skipped = 0
+            if source_slug in LEGAL_SOURCE_SLUGS:
+                raw_text = artifact_bytes_to_text(
+                    artifact.content,
+                    artifact.content_type,
+                    source_version.artifact_uri,
+                )
+                parsed_created, parsed_updated, parsed_skipped = parse_legal_document(
+                    db,
+                    source,
+                    source_version,
+                    raw_text,
+                )
+                created += parsed_created
+                updated += parsed_updated
+                skipped += parsed_skipped
+            return source_version, created, updated, skipped
+
+        source_version = record_ingestion_run(
+            db,
+            "ingest_artifact",
+            operation,
+            source_id=source.id,
+        )
+        print(
+            f"Ingested artifact for {source.slug}: "
+            f"{source_version.content_hash}"
+        )
 
 
 def load_hpd_violations_command() -> None:
@@ -289,6 +372,12 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("source_slug")
 
+    ingest_artifact = subparsers.add_parser("ingest-artifact")
+    ingest_artifact.add_argument("source_slug")
+    ingest_artifact.add_argument("--file", required=True)
+    ingest_artifact.add_argument("--source-url", required=True)
+    ingest_artifact.add_argument("--content-type")
+
     return parser
 
 
@@ -304,6 +393,13 @@ def main() -> int:
             parse_source_command(args.source_slug)
         elif args.command == "ingest-source":
             ingest_source_command(args.source_slug)
+        elif args.command == "ingest-artifact":
+            ingest_artifact_command(
+                args.source_slug,
+                args.file,
+                args.source_url,
+                args.content_type,
+            )
         elif args.command == "load-hpd-violations":
             load_hpd_violations_command()
         elif args.command == "ingest-mvp":
