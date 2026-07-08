@@ -16,8 +16,23 @@ Before ingestion:
 
 -   Confirm a recent database backup exists.
 -   Confirm source registry notes still show public access.
+-   Check source acquisition status.
 -   Confirm artifact storage has enough capacity.
 -   Confirm production rate limits are enabled.
+
+Check source acquisition status:
+
+``` text
+uv run python -m app.cli.ingest source-availability
+```
+
+Official source strategy:
+
+-   NYC Admin Code / Housing Maintenance Code: official AmLegal publication.
+    Automated ingestion is disabled until a permitted official export or API is
+    confirmed. Use `ingest-artifact` only with an official saved artifact.
+-   NY state statutes: official NY Senate PDF/API sources.
+-   HPD and property datasets: NYC Open Data / Socrata APIs.
 
 ## Full MVP Ingestion
 
@@ -40,11 +55,9 @@ uv run python -m app.cli.ingest ingest-missing
 ```
 
 If a configured public source blocks CLI download or moves, `ingest-missing`
-records the failed source in `ingestion_runs`, prints a warning, and continues
-with the sources that did load. The NYC Housing Maintenance Code is configured
-to use the official AmLegal publication. Do not substitute unofficial mirrors.
-If the AmLegal URL returns `403 Forbidden`, use a manually obtained artifact
-from the official public page while preserving the official source URL.
+prints a warning and continues with sources that can load. The NYC Housing
+Maintenance Code direct-download path is intentionally disabled pending a
+permitted official export or API. Do not substitute unofficial mirrors.
 
 Check ingestion status:
 

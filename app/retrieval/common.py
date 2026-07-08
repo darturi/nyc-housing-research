@@ -2,6 +2,7 @@ from sqlalchemy import Select
 
 from app.models.document import Document
 from app.models.source import Source
+from app.models.source_version import SourceVersion
 from app.retrieval.schemas import SearchFilters, SearchResult
 
 ALLOWED_ACCESS_TYPES = ("public_api", "public_web")
@@ -19,6 +20,7 @@ def apply_filters(query: Select, filters: SearchFilters) -> Select:
         Source.is_active.is_(True),
         Source.access_type.in_(ALLOWED_ACCESS_TYPES),
         Source.license_status.in_(ALLOWED_LICENSE_STATUSES),
+        SourceVersion.is_current.is_(True),
     )
     if filters.source_type:
         query = query.where(Source.source_type == filters.source_type)
@@ -47,8 +49,12 @@ def filter_sql(
     filters: SearchFilters,
     source_alias: str = "s",
     document_alias: str = "d",
+    source_version_alias: str = "sv",
 ) -> tuple[str, dict[str, str]]:
-    conditions = [source_eligibility_sql(source_alias)]
+    conditions = [
+        source_eligibility_sql(source_alias),
+        f"{source_version_alias}.is_current = true",
+    ]
     params: dict[str, str] = {}
     if filters.source_type:
         conditions.append(f"{source_alias}.source_type = :source_type")

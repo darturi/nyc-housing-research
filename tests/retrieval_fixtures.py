@@ -56,6 +56,49 @@ def create_retrieval_corpus() -> None:
     generate_embeddings()
 
 
+def create_hmc_corpus_with_superseded_version() -> tuple[str, str]:
+    old_content = """
+    § 27-2005 Duties of owner.
+    This obsolete owner standard should not appear in current retrieval.
+    """
+    current_content = """
+    § 27-2005 Duties of owner.
+    The current owner standard requires keeping premises in good repair.
+    """
+    with SessionLocal() as db:
+        seed_sources(db)
+        source = (
+            db.query(Source)
+            .filter_by(slug="nyc-housing-maintenance-code")
+            .one()
+        )
+        old_artifact = DownloadedArtifact(
+            content=old_content.encode("utf-8"),
+            content_hash=hash_bytes(old_content.encode("utf-8")),
+            content_type="text/plain",
+            byte_size=len(old_content.encode("utf-8")),
+            extension="txt",
+            source_url=f"{source.source_url}?version=old",
+        )
+        old_version = create_or_get_source_version(db, source, old_artifact)
+        parse_legal_document(db, source, old_version, old_content)
+
+        current_artifact = DownloadedArtifact(
+            content=current_content.encode("utf-8"),
+            content_hash=hash_bytes(current_content.encode("utf-8")),
+            content_type="text/plain",
+            byte_size=len(current_content.encode("utf-8")),
+            extension="txt",
+            source_url=f"{source.source_url}?version=current",
+        )
+        current_version = create_or_get_source_version(db, source, current_artifact)
+        parse_legal_document(db, source, current_version, current_content)
+        old_version_id = old_version.id
+        current_version_id = current_version.id
+    generate_embeddings()
+    return old_version_id, current_version_id
+
+
 def create_rpapl_corpus_with_guidance_noise() -> None:
     rpapl_content = """
     ARTICLE 7

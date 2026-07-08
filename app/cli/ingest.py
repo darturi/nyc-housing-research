@@ -7,6 +7,11 @@ from pathlib import Path
 from sqlalchemy import func, or_, select
 
 from app.db.session import SessionLocal
+from app.ingestion.acquisition import (
+    acquisition_for_slug,
+    ensure_automated_acquisition_enabled,
+    source_availability,
+)
 from app.ingestion.artifacts import artifact_exists, read_artifact
 from app.ingestion.downloaders import (
     DownloadedArtifact,
@@ -53,6 +58,7 @@ def seed_sources_command() -> None:
 def download_source_command(source_slug: str) -> SourceVersion:
     with SessionLocal() as db:
         source = get_source_by_slug(db, source_slug)
+        ensure_automated_acquisition_enabled(source.slug)
 
         def operation():
             artifact = download_url(source.source_url)
@@ -246,6 +252,13 @@ def ingest_missing_command() -> None:
             {"chunks": 0, "missing_own_citations": 0, "dirty_chunks": 0},
         )
         if source_status["chunks"] == 0:
+            acquisition = acquisition_for_slug(source_slug)
+            if not acquisition.automated_enabled:
+                failures.append(
+                    f"{source_slug}: automated ingestion disabled "
+                    f"({acquisition.mode}). {acquisition.note}"
+                )
+                continue
             try:
                 ingest_source_command(source_slug)
             except Exception as exc:
@@ -357,6 +370,18 @@ def verify_traceability_command() -> None:
         )
 
 
+def source_availability_command() -> None:
+    for row in source_availability():
+        automated = "true" if row.automated_enabled else "false"
+        print(
+            f"{row.source_slug}: mode={row.mode} "
+            f"automated={automated}"
+        )
+        print(f"  name: {row.name}")
+        print(f"  url: {row.source_url}")
+        print(f"  note: {row.note}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run ingestion commands.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -367,6 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("ingest-missing")
     subparsers.add_parser("status")
     subparsers.add_parser("verify-traceability")
+    subparsers.add_parser("source-availability")
 
     for command in ("download-source", "parse-source", "ingest-source"):
         subparser = subparsers.add_parser(command)
@@ -410,6 +436,8 @@ def main() -> int:
             status_command()
         elif args.command == "verify-traceability":
             verify_traceability_command()
+        elif args.command == "source-availability":
+            source_availability_command()
         else:
             parser.error(f"Unknown command: {args.command}")
     except Exception as exc:

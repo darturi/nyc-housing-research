@@ -1,7 +1,12 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.cli.ingest import ingest_artifact_command, ingest_missing_command
+from app.cli.ingest import (
+    download_source_command,
+    ingest_artifact_command,
+    ingest_missing_command,
+    source_availability_command,
+)
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.ingestion.artifacts import artifact_exists
@@ -14,11 +19,12 @@ from app.models.source_version import SourceVersion
 
 
 def test_ingest_missing_warns_without_raising_for_blocked_source(monkeypatch, capsys):
-    def fake_ingest_source(source_slug: str) -> None:
-        if source_slug == "nyc-housing-maintenance-code":
-            raise RuntimeError("403 Forbidden")
+    attempted_sources: list[str] = []
 
-    monkeypatch.setattr("app.cli.ingest.ingest_source_command", fake_ingest_source)
+    monkeypatch.setattr(
+        "app.cli.ingest.ingest_source_command",
+        lambda source_slug: attempted_sources.append(source_slug),
+    )
     monkeypatch.setattr("app.cli.ingest.load_hpd_violations_command", lambda: None)
 
     ingest_missing_command()
@@ -26,7 +32,32 @@ def test_ingest_missing_warns_without_raising_for_blocked_source(monkeypatch, ca
     captured = capsys.readouterr()
     assert "Completed missing-source ingestion." in captured.out
     assert "Warning: some sources failed to ingest." in captured.err
-    assert "nyc-housing-maintenance-code: 403 Forbidden" in captured.err
+    assert "nyc-housing-maintenance-code: automated ingestion disabled" in captured.err
+    assert "nyc-housing-maintenance-code" not in attempted_sources
+
+
+def test_source_availability_reports_hmc_manual_fallback(capsys):
+    source_availability_command()
+
+    captured = capsys.readouterr()
+    assert (
+        "nyc-housing-maintenance-code: "
+        "mode=manual_fallback_required automated=false"
+    ) in captured.out
+    assert "ny-rpapl: mode=direct_http automated=true" in captured.out
+    assert "hpd-violations: mode=public_api automated=true" in captured.out
+
+
+def test_direct_hmc_download_is_disabled_before_network():
+    with SessionLocal() as db:
+        seed_sources(db)
+
+    try:
+        download_source_command("nyc-housing-maintenance-code")
+    except ValueError as exc:
+        assert "automated ingestion disabled" in str(exc)
+    else:
+        raise AssertionError("Expected HMC direct download to be disabled.")
 
 
 def test_ingest_artifact_command_creates_traceable_hmc_chunks(tmp_path):

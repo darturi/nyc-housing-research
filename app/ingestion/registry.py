@@ -30,7 +30,7 @@ MVP_SOURCE_SEEDS = [
         jurisdiction="NYC",
         source_url=(
             "https://codelibrary.amlegal.com/codes/newyorkcity/latest/"
-            "NYCadmin/0-0-0-1"
+            "NYCadmin/0-0-0-60027"
         ),
         access_type="public_web",
         license_status="public_official_terms_reviewed",
