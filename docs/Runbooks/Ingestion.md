@@ -32,6 +32,8 @@ Official source strategy:
     linked from the code library overview. The HMC importer stores the full ZIP
     and parses `XML/0-0-0-60027.xml`.
 -   NY state statutes: official NY Senate PDF/API sources.
+-   HPD guidance: curated official NYC.gov guidance pages bundled into one JSON
+    artifact, then parsed into page and heading-level chunks.
 -   HPD and property datasets: NYC Open Data / Socrata APIs.
 
 ## Full MVP Ingestion
@@ -88,6 +90,7 @@ Download and parse one legal or guidance source:
 
 ``` text
 uv run python -m app.cli.ingest ingest-source nyc-housing-maintenance-code
+uv run python -m app.cli.ingest ingest-source hpd-guidance
 ```
 
 Ingest a manually obtained official artifact when direct CLI download is
@@ -105,6 +108,7 @@ Generate embeddings for one source:
 
 ``` text
 uv run python -m app.cli.embeddings generate --source-slug nyc-housing-maintenance-code
+uv run python -m app.cli.embeddings generate --source-slug hpd-guidance
 ```
 
 ## HPD Violations

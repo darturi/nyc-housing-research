@@ -22,6 +22,11 @@ from app.ingestion.downloaders import (
     extension_from_content_type,
     hash_bytes,
 )
+from app.ingestion.hpd_guidance import (
+    download_hpd_guidance_bundle,
+    parse_hpd_guidance_bundle_document,
+    parse_hpd_guidance_html_document,
+)
 from app.ingestion.hpd_violations import upsert_hpd_violations
 from app.ingestion.legal_text import artifact_bytes_to_text, parse_legal_document
 from app.ingestion.registry import get_source_by_slug, seed_sources
@@ -79,10 +84,19 @@ def download_source_command(source_slug: str) -> SourceVersion:
 
 def download_source_artifact(source: Source) -> DownloadedArtifact:
     acquisition = acquisition_for_slug(source.slug)
+    if acquisition.mode == "hpd_guidance_bundle":
+        return download_hpd_guidance_bundle(
+            source.source_url,
+            progress=print_download_progress,
+        )
     artifact = download_url(acquisition.download_url or source.source_url)
     if acquisition.mode == "bulk_xml":
         return replace(artifact, source_url=source.source_url)
     return artifact
+
+
+def print_download_progress(message: str) -> None:
+    print(message, flush=True)
 
 
 def current_source_version(db, source: Source) -> SourceVersion:
@@ -130,6 +144,10 @@ def parse_source_artifact(
         source_version,
     ):
         return parse_hmc_bulk_xml_document(db, source, source_version, content)
+    if source.slug == "hpd-guidance" and is_json_artifact(source_version):
+        return parse_hpd_guidance_bundle_document(db, source, source_version, content)
+    if source.slug == "hpd-guidance":
+        return parse_hpd_guidance_html_document(db, source, source_version, content)
     raw_text = artifact_bytes_to_text(
         content,
         source_version.content_type,
@@ -141,6 +159,13 @@ def parse_source_artifact(
 def is_zip_artifact(source_version: SourceVersion) -> bool:
     content_type = (source_version.content_type or "").lower()
     return "zip" in content_type or source_version.artifact_uri.lower().endswith(".zip")
+
+
+def is_json_artifact(source_version: SourceVersion) -> bool:
+    content_type = (source_version.content_type or "").lower()
+    return "json" in content_type or source_version.artifact_uri.lower().endswith(
+        ".json"
+    )
 
 
 def ingest_source_command(source_slug: str) -> None:
@@ -258,6 +283,7 @@ def ingest_missing_command() -> None:
                     source.id,
                 ),
                 "dirty_chunks": count_dirty_chunks(db, source.id),
+                "broad_guidance_chunks": count_broad_guidance_chunks(db, source.id),
             }
             for source in db.scalars(
                 select(Source).where(Source.slug.in_(LEGAL_SOURCE_SLUGS))
@@ -272,7 +298,12 @@ def ingest_missing_command() -> None:
     for source_slug in LEGAL_SOURCE_SLUGS:
         source_status = legal_status.get(
             source_slug,
-            {"chunks": 0, "missing_own_citations": 0, "dirty_chunks": 0},
+            {
+                "chunks": 0,
+                "missing_own_citations": 0,
+                "dirty_chunks": 0,
+                "broad_guidance_chunks": 0,
+            },
         )
         if source_status["chunks"] == 0:
             acquisition = acquisition_for_slug(source_slug)
@@ -289,9 +320,16 @@ def ingest_missing_command() -> None:
         elif (
             source_status["missing_own_citations"] > 0
             or source_status["dirty_chunks"] > 0
+            or (
+                source_slug == "hpd-guidance"
+                and source_status["broad_guidance_chunks"] > 0
+            )
         ):
             try:
-                parse_source_command(source_slug)
+                if source_slug == "hpd-guidance":
+                    ingest_source_command(source_slug)
+                else:
+                    parse_source_command(source_slug)
             except Exception as exc:
                 failures.append(f"{source_slug}: {exc}")
 
@@ -351,6 +389,24 @@ def count_dirty_chunks(db, source_id: str) -> int:
     )
 
 
+def count_broad_guidance_chunks(db, source_id: str) -> int:
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(Chunk)
+            .join(SourceVersion, SourceVersion.id == Chunk.source_version_id)
+            .where(
+                Chunk.source_id == source_id,
+                SourceVersion.is_current.is_(True),
+                Chunk.chunk_type == "section",
+                Chunk.citation.is_(None),
+                Chunk.title == "Full Text",
+            )
+        )
+        or 0
+    )
+
+
 def status_command() -> None:
     with SessionLocal() as db:
         counts = {
@@ -373,10 +429,22 @@ def verify_traceability_command() -> None:
             for source_version in source_versions
             if not artifact_exists(source_version.artifact_uri)
         ]
-        chunks_missing_citation = (
+        law_chunks_missing_citation = (
             db.scalar(
                 select(func.count())
                 .select_from(Chunk)
+                .join(Source, Source.id == Chunk.source_id)
+                .where(Source.source_type == "law")
+                .where(Chunk.citation.is_(None))
+            )
+            or 0
+        )
+        guidance_chunks_without_citation = (
+            db.scalar(
+                select(func.count())
+                .select_from(Chunk)
+                .join(Source, Source.id == Chunk.source_id)
+                .where(Source.source_type == "guidance")
                 .where(Chunk.citation.is_(None))
             )
             or 0
@@ -385,7 +453,8 @@ def verify_traceability_command() -> None:
     print(f"source_versions: {len(source_versions)}")
     print(f"missing_artifacts: {len(missing_artifacts)}")
     print(f"chunks: {chunks_total}")
-    print(f"chunks_missing_citation: {chunks_missing_citation}")
+    print(f"law_chunks_missing_citation: {law_chunks_missing_citation}")
+    print(f"guidance_chunks_without_citation: {guidance_chunks_without_citation}")
     if missing_artifacts:
         raise RuntimeError(
             "Missing artifacts for source versions: "

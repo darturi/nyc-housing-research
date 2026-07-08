@@ -52,9 +52,12 @@ ACQUISITION_BY_SLUG = {
     ),
     "hpd-guidance": SourceAcquisition(
         source_slug="hpd-guidance",
-        mode="direct_http",
+        mode="hpd_guidance_bundle",
         automated_enabled=True,
-        note="Official NYC.gov public web page.",
+        note=(
+            "Curated official NYC.gov HPD guidance pages bundled into one "
+            "traceable JSON artifact."
+        ),
     ),
     "hpd-violations": SourceAcquisition(
         source_slug="hpd-violations",

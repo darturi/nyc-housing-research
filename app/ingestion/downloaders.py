@@ -45,14 +45,25 @@ def extension_from_content_type(content_type: str | None, source_url: str) -> st
     return (guessed or ".bin").lstrip(".")
 
 
-def download_url(url: str) -> DownloadedArtifact:
+def download_url(
+    url: str,
+    *,
+    timeout_seconds: int | None = None,
+    max_retries: int | None = None,
+) -> DownloadedArtifact:
     settings = get_settings()
     headers = {"User-Agent": settings.ingestion_user_agent}
+    resolved_timeout_seconds = (
+        timeout_seconds or settings.ingestion_http_timeout_seconds
+    )
+    resolved_max_retries = (
+        settings.ingestion_http_max_retries if max_retries is None else max_retries
+    )
     last_error: Exception | None = None
-    for attempt in range(settings.ingestion_http_max_retries + 1):
+    for attempt in range(resolved_max_retries + 1):
         try:
             with httpx.Client(
-                timeout=settings.ingestion_http_timeout_seconds,
+                timeout=resolved_timeout_seconds,
                 follow_redirects=True,
                 headers=headers,
             ) as client:
@@ -61,7 +72,7 @@ def download_url(url: str) -> DownloadedArtifact:
             break
         except httpx.HTTPError as exc:
             last_error = exc
-            if attempt < settings.ingestion_http_max_retries:
+            if attempt < resolved_max_retries:
                 sleep(0.5 * (attempt + 1))
                 continue
             raise
