@@ -99,6 +99,15 @@ def evaluate_expectations(
                 f"expected a citation from source_type {required_source_type!r}"
             )
 
+    required_citation_contains = item.get("required_citation_contains")
+    if required_citation_contains and not citation_text_matches(
+        answer.citations,
+        required_citation_contains,
+    ):
+        failures.append(
+            f"expected a citation containing {required_citation_contains!r}"
+        )
+
     for term in item.get("required_answer_terms", []):
         if term.lower() not in answer.answer.lower():
             failures.append(f"expected answer to contain {term!r}")
@@ -112,6 +121,16 @@ def citation_source_name_matches(
 ) -> bool:
     expected = expected_substring.lower()
     return any(expected in citation.source_name.lower() for citation in citations)
+
+
+def citation_text_matches(
+    citations: list[AnswerCitation],
+    expected_substring: str,
+) -> bool:
+    expected = expected_substring.lower()
+    return any(
+        expected in (citation.citation or "").lower() for citation in citations
+    )
 
 
 def source_types_for_citations(db, citations: list[AnswerCitation]) -> dict[str, str]:

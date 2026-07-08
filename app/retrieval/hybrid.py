@@ -5,6 +5,11 @@ from sqlalchemy.orm import Session as DbSession
 from app.core.config import get_settings
 from app.retrieval.citations import citation_lookup
 from app.retrieval.keyword import keyword_search
+from app.retrieval.query_quality import (
+    expand_query_text,
+    focused_query_texts,
+    rerank_results,
+)
 from app.retrieval.schemas import SearchFilters, SearchResult
 from app.retrieval.vector import vector_search
 
@@ -71,11 +76,17 @@ def hybrid_search(
     filters: SearchFilters,
     limit: int,
 ) -> list[SearchResult]:
+    expanded_query_text = expand_query_text(query_text)
+    focused_queries = focused_query_texts(query_text)
     candidates = [
         citation_lookup(db, query_text, filters, limit),
         keyword_search(db, query_text, filters, limit),
         vector_search(db, query_text, filters, limit),
     ]
+    if expanded_query_text != query_text:
+        candidates.append(keyword_search(db, expanded_query_text, filters, limit))
+    for focused_query_text in focused_queries:
+        candidates.append(keyword_search(db, focused_query_text, filters, limit))
     hinted_filters = source_hint_filters(query_text, filters)
     if hinted_filters is not None:
         candidates.extend(
@@ -85,7 +96,16 @@ def hybrid_search(
                 vector_search(db, query_text, hinted_filters, limit),
             ]
         )
-    return apply_source_hint_boost(merge_results(candidates), query_text)[:limit]
+        if expanded_query_text != query_text:
+            candidates.append(
+                keyword_search(db, expanded_query_text, hinted_filters, limit)
+            )
+        for focused_query_text in focused_queries:
+            candidates.append(
+                keyword_search(db, focused_query_text, hinted_filters, limit)
+            )
+    boosted = apply_source_hint_boost(merge_results(candidates), query_text)
+    return rerank_results(boosted, query_text)[:limit]
 
 
 def source_hint_for_query(query_text: str) -> tuple[str, str] | None:

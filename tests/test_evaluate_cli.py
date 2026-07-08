@@ -25,6 +25,7 @@ def test_evaluate_expectations_accepts_answered_result():
             "min_citation_count": 1,
             "required_source_type": "law",
             "required_source_name_contains": "Housing Maintenance Code",
+            "required_citation_contains": "27-2005",
             "required_answer_terms": ["good repair"],
         },
         answer,
@@ -54,6 +55,7 @@ def test_evaluate_expectations_reports_actionable_failures():
             "min_citation_count": 1,
             "required_source_type": "guidance",
             "required_source_name_contains": "HPD",
+            "required_citation_contains": "27-2029",
             "required_answer_terms": ["complaint"],
         },
         answer,
@@ -63,6 +65,7 @@ def test_evaluate_expectations_reports_actionable_failures():
     assert "expected at least 1 citations, got 0" in failures
     assert "expected a citation from source_type 'guidance'" in failures
     assert "expected a citation source name containing 'HPD'" in failures
+    assert "expected a citation containing '27-2029'" in failures
     assert "expected answer to contain 'complaint'" in failures
 
 
