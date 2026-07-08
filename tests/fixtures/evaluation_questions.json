@@ -4,10 +4,53 @@
     "question": "What does NYC Admin Code § 27-2005 require an owner to do?",
     "filters": {
       "source_type": "law"
-    }
+    },
+    "expected_status": "answered",
+    "min_citation_count": 1,
+    "required_source_type": "law",
+    "required_source_name_contains": "Housing Maintenance Code",
+    "required_answer_terms": ["Duties of owner"]
+  },
+  {
+    "id": "hmc-heat-hot-water",
+    "question": "What does NYC Admin Code § 27-2029 require about heat?",
+    "filters": {
+      "source_type": "law"
+    },
+    "expected_status": "answered",
+    "min_citation_count": 1,
+    "required_source_type": "law",
+    "required_source_name_contains": "Housing Maintenance Code",
+    "required_answer_terms": ["temperature"]
+  },
+  {
+    "id": "hpd-report-complaint",
+    "question": "How can a tenant report a housing complaint to HPD?",
+    "filters": {
+      "source_type": "guidance"
+    },
+    "expected_status": "answered",
+    "min_citation_count": 1,
+    "required_source_type": "guidance",
+    "required_source_name_contains": "HPD",
+    "required_answer_terms": ["complaint"]
+  },
+  {
+    "id": "hpd-enforcement",
+    "question": "What HPD enforcement information is available for tenants and owners?",
+    "filters": {
+      "source_type": "guidance"
+    },
+    "expected_status": "answered",
+    "min_citation_count": 1,
+    "required_source_type": "guidance",
+    "required_source_name_contains": "HPD",
+    "required_answer_terms": ["enforcement"]
   },
   {
     "id": "unsupported-case-law",
-    "question": "What did the court hold in an unpublished housing case?"
+    "question": "What did the court hold in an unpublished housing case?",
+    "expected_status": "unsupported",
+    "min_citation_count": 0
   }
 ]
