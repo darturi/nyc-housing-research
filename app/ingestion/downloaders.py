@@ -29,10 +29,14 @@ def hash_bytes(content_bytes: bytes) -> str:
 
 
 def extension_from_content_type(content_type: str | None, source_url: str) -> str:
+    if source_url.endswith(".zip"):
+        return "zip"
     if source_url.endswith(".json"):
         return "json"
     if source_url.endswith(".html") or "text/html" in (content_type or ""):
         return "html"
+    if "zip" in (content_type or ""):
+        return "zip"
     if "json" in (content_type or ""):
         return "json"
     if "text/plain" in (content_type or ""):

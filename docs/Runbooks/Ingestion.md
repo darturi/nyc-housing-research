@@ -28,9 +28,9 @@ uv run python -m app.cli.ingest source-availability
 
 Official source strategy:
 
--   NYC Admin Code / Housing Maintenance Code: official AmLegal publication.
-    Automated ingestion is disabled until a permitted official export or API is
-    confirmed. Use `ingest-artifact` only with an official saved artifact.
+-   NYC Admin Code / Housing Maintenance Code: official AmLegal bulk XML ZIP
+    linked from the code library overview. The HMC importer stores the full ZIP
+    and parses `XML/0-0-0-60027.xml`.
 -   NY state statutes: official NY Senate PDF/API sources.
 -   HPD and property datasets: NYC Open Data / Socrata APIs.
 
@@ -55,9 +55,8 @@ uv run python -m app.cli.ingest ingest-missing
 ```
 
 If a configured public source blocks CLI download or moves, `ingest-missing`
-prints a warning and continues with sources that can load. The NYC Housing
-Maintenance Code direct-download path is intentionally disabled pending a
-permitted official export or API. Do not substitute unofficial mirrors.
+prints a warning and continues with sources that can load. Do not substitute
+unofficial mirrors.
 
 Check ingestion status:
 
@@ -92,13 +91,14 @@ uv run python -m app.cli.ingest ingest-source nyc-housing-maintenance-code
 ```
 
 Ingest a manually obtained official artifact when direct CLI download is
-blocked:
+blocked. This is a fallback only; normal HMC ingestion uses the AmLegal bulk
+XML ZIP:
 
 ``` text
 uv run python -m app.cli.ingest ingest-artifact nyc-housing-maintenance-code \
-  --file /path/to/housing-maintenance-code.html \
+  --file /path/to/XML.zip \
   --source-url https://codelibrary.amlegal.com/codes/newyorkcity/latest/NYCadmin/0-0-0-60027 \
-  --content-type text/html
+  --content-type application/zip
 ```
 
 Generate embeddings for one source:

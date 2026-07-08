@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from dataclasses import replace
 from mimetypes import guess_type
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from app.ingestion.acquisition import (
     ensure_automated_acquisition_enabled,
     source_availability,
 )
+from app.ingestion.amlegal_xml import parse_hmc_bulk_xml_document
 from app.ingestion.artifacts import artifact_exists, read_artifact
 from app.ingestion.downloaders import (
     DownloadedArtifact,
@@ -61,7 +63,7 @@ def download_source_command(source_slug: str) -> SourceVersion:
         ensure_automated_acquisition_enabled(source.slug)
 
         def operation():
-            artifact = download_url(source.source_url)
+            artifact = download_source_artifact(source)
             source_version = create_or_get_source_version(db, source, artifact)
             return source_version, 1, 0, 0
 
@@ -73,6 +75,14 @@ def download_source_command(source_slug: str) -> SourceVersion:
         )
         print(f"Downloaded {source.slug}: {source_version.content_hash}")
         return source_version
+
+
+def download_source_artifact(source: Source) -> DownloadedArtifact:
+    acquisition = acquisition_for_slug(source.slug)
+    artifact = download_url(acquisition.download_url or source.source_url)
+    if acquisition.mode == "bulk_xml":
+        return replace(artifact, source_url=source.source_url)
+    return artifact
 
 
 def current_source_version(db, source: Source) -> SourceVersion:
@@ -92,16 +102,11 @@ def parse_source_command(source_slug: str) -> None:
         source_version = current_source_version(db, source)
 
         def operation():
-            raw_text = artifact_bytes_to_text(
-                read_artifact(source_version.artifact_uri),
-                source_version.content_type,
-                source_version.artifact_uri,
-            )
-            created, updated, skipped = parse_legal_document(
+            created, updated, skipped = parse_source_artifact(
                 db,
                 source,
                 source_version,
-                raw_text,
+                read_artifact(source_version.artifact_uri),
             )
             return None, created, updated, skipped
 
@@ -113,6 +118,29 @@ def parse_source_command(source_slug: str) -> None:
             source_version_id=source_version.id,
         )
         print(f"Parsed {source.slug}.")
+
+
+def parse_source_artifact(
+    db,
+    source: Source,
+    source_version: SourceVersion,
+    content: bytes,
+) -> tuple[int, int, int]:
+    if source.slug == "nyc-housing-maintenance-code" and is_zip_artifact(
+        source_version,
+    ):
+        return parse_hmc_bulk_xml_document(db, source, source_version, content)
+    raw_text = artifact_bytes_to_text(
+        content,
+        source_version.content_type,
+        source_version.artifact_uri,
+    )
+    return parse_legal_document(db, source, source_version, raw_text)
+
+
+def is_zip_artifact(source_version: SourceVersion) -> bool:
+    content_type = (source_version.content_type or "").lower()
+    return "zip" in content_type or source_version.artifact_uri.lower().endswith(".zip")
 
 
 def ingest_source_command(source_slug: str) -> None:
@@ -168,16 +196,11 @@ def ingest_artifact_command(
             updated = 0
             skipped = 0
             if source_slug in LEGAL_SOURCE_SLUGS:
-                raw_text = artifact_bytes_to_text(
-                    artifact.content,
-                    artifact.content_type,
-                    source_version.artifact_uri,
-                )
-                parsed_created, parsed_updated, parsed_skipped = parse_legal_document(
+                parsed_created, parsed_updated, parsed_skipped = parse_source_artifact(
                     db,
                     source,
                     source_version,
-                    raw_text,
+                    artifact.content,
                 )
                 created += parsed_created
                 updated += parsed_updated
@@ -379,6 +402,10 @@ def source_availability_command() -> None:
         )
         print(f"  name: {row.name}")
         print(f"  url: {row.source_url}")
+        if row.download_url:
+            print(f"  download_url: {row.download_url}")
+        if row.artifact_member:
+            print(f"  artifact_member: {row.artifact_member}")
         print(f"  note: {row.note}")
 
 

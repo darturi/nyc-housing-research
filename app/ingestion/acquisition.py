@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.ingestion.amlegal_xml import AMLEGAL_NYC_ADMIN_XML_ZIP_URL, HMC_XML_MEMBER
 from app.ingestion.registry import MVP_SOURCE_SEEDS
 
 
@@ -9,6 +10,8 @@ class SourceAcquisition:
     mode: str
     automated_enabled: bool
     note: str
+    download_url: str | None = None
+    artifact_member: str | None = None
 
 
 @dataclass(frozen=True)
@@ -19,18 +22,21 @@ class SourceAvailability:
     mode: str
     automated_enabled: bool
     note: str
+    download_url: str | None
+    artifact_member: str | None
 
 
 ACQUISITION_BY_SLUG = {
     "nyc-housing-maintenance-code": SourceAcquisition(
         source_slug="nyc-housing-maintenance-code",
-        mode="manual_fallback_required",
-        automated_enabled=False,
+        mode="bulk_xml",
+        automated_enabled=True,
         note=(
-            "Official AmLegal publication is canonical, but automated ingestion "
-            "is disabled until a permitted export or API is confirmed. Use "
-            "ingest-artifact with an official saved artifact."
+            "Official AmLegal Administrative Code bulk XML ZIP; parse only the "
+            "Housing Maintenance Code XML member."
         ),
+        download_url=AMLEGAL_NYC_ADMIN_XML_ZIP_URL,
+        artifact_member=HMC_XML_MEMBER,
     ),
     "ny-multiple-dwelling-law": SourceAcquisition(
         source_slug="ny-multiple-dwelling-law",
@@ -93,6 +99,8 @@ def source_availability() -> list[SourceAvailability]:
                 mode=acquisition.mode,
                 automated_enabled=acquisition.automated_enabled,
                 note=acquisition.note,
+                download_url=acquisition.download_url,
+                artifact_member=acquisition.artifact_member,
             )
         )
     return rows

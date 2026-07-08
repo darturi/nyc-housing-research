@@ -254,6 +254,19 @@ def parse_legal_document(
     raw_text: str,
 ) -> tuple[int, int, int]:
     parsed_sections = split_sections(raw_text, source.slug)
+    return parse_legal_sections(db, source, source_version, parsed_sections)
+
+
+def parse_legal_sections(
+    db: DbSession,
+    source: Source,
+    source_version: SourceVersion,
+    parsed_sections: list[ParsedSection],
+) -> tuple[int, int, int]:
+    if source.source_type == "law" and not parsed_sections:
+        raise ValueError(
+            f"{source.slug} did not split into citation-bearing law sections."
+        )
     if source.source_type == "law" and any(
         section.citation is None for section in parsed_sections
     ):
