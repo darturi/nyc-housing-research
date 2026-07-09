@@ -243,6 +243,24 @@ def prune_old_events(db: DbSession, retention_days: int | None = None) -> int:
     return result.rowcount or 0
 
 
+def reset_user_limit_state(db: DbSession, user_id: str) -> tuple[int, int]:
+    now = utc_now()
+    day_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+
+    rate_limit_result = db.execute(
+        delete(RateLimitEvent).where(RateLimitEvent.user_id == user_id)
+    )
+    # Daily LLM budget usage is derived from today's answer logs.
+    answer_log_result = db.execute(
+        delete(AnswerLog).where(
+            AnswerLog.user_id == user_id,
+            AnswerLog.created_at >= day_start,
+        )
+    )
+    db.commit()
+    return rate_limit_result.rowcount or 0, answer_log_result.rowcount or 0
+
+
 def _aware_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)

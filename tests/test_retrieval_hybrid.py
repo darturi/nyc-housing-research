@@ -87,8 +87,10 @@ def test_hybrid_search_returns_hpd_guidance_for_complaints_and_enforcement():
 
     assert complaint_results[0].source_type == "guidance"
     assert complaint_results[0].title == "Report a Housing Complaint"
+    assert complaint_results[0].source_url.endswith("report-a-housing-complaint.page")
     assert enforcement_results[0].source_type == "guidance"
     assert enforcement_results[0].title == "Enforcement"
+    assert enforcement_results[0].source_url.endswith("enforcement.page")
 
 
 def test_hybrid_search_excludes_superseded_source_versions():

@@ -74,7 +74,7 @@ def _postgres_vector_search(
                 s.name AS source_name,
                 s.source_type AS source_type,
                 s.jurisdiction AS jurisdiction,
-                COALESCE(sv.source_url, s.source_url) AS source_url,
+                COALESCE(d.source_url, sv.source_url, s.source_url) AS source_url,
                 c.citation AS citation,
                 c.title AS title,
                 c.text AS chunk_text,

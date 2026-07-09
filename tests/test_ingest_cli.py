@@ -187,6 +187,35 @@ def test_ingest_source_command_parses_hmc_bulk_xml(monkeypatch, tmp_path):
     assert citation.chunk_id == chunks[0].id
 
 
+def test_ingest_source_command_seeds_empty_source_registry(monkeypatch, tmp_path):
+    settings = get_settings()
+    settings.artifact_storage_backend = "local"
+    settings.artifact_storage_path = str(tmp_path / "artifacts")
+    zip_content = minimal_hmc_zip()
+
+    def fake_download_url(url: str):
+        return DownloadedArtifact(
+            content=zip_content,
+            content_hash=hash_bytes(zip_content),
+            content_type="application/zip",
+            byte_size=len(zip_content),
+            extension="zip",
+            source_url=url,
+        )
+
+    monkeypatch.setattr("app.cli.ingest.download_url", fake_download_url)
+
+    ingest_source_command("nyc-housing-maintenance-code")
+
+    with SessionLocal() as db:
+        sources = db.query(Source).count()
+        source = db.query(Source).filter_by(slug="nyc-housing-maintenance-code").one()
+        chunks = db.query(Chunk).filter_by(source_id=source.id).all()
+
+    assert sources == 5
+    assert len(chunks) == 2
+
+
 def test_ingest_source_command_parses_hpd_guidance_bundle(monkeypatch, tmp_path):
     settings = get_settings()
     settings.artifact_storage_backend = "local"

@@ -29,7 +29,7 @@ from app.ingestion.hpd_guidance import (
 )
 from app.ingestion.hpd_violations import upsert_hpd_violations
 from app.ingestion.legal_text import artifact_bytes_to_text, parse_legal_document
-from app.ingestion.registry import get_source_by_slug, seed_sources
+from app.ingestion.registry import seed_sources
 from app.ingestion.runners import record_ingestion_run
 from app.models.chunk import Chunk
 from app.models.citation import Citation
@@ -62,9 +62,24 @@ def seed_sources_command() -> None:
         print("Seeded source registry.")
 
 
+def source_for_command(db, source_slug: str) -> Source:
+    source = db.scalar(select(Source).where(Source.slug == source_slug))
+    if source is not None:
+        return source
+
+    source_count = db.scalar(select(func.count()).select_from(Source)) or 0
+    if source_count == 0:
+        seed_sources(db)
+        source = db.scalar(select(Source).where(Source.slug == source_slug))
+        if source is not None:
+            return source
+
+    raise ValueError(f"Unknown source slug: {source_slug}")
+
+
 def download_source_command(source_slug: str) -> SourceVersion:
     with SessionLocal() as db:
-        source = get_source_by_slug(db, source_slug)
+        source = source_for_command(db, source_slug)
         ensure_automated_acquisition_enabled(source.slug)
 
         def operation():
@@ -112,7 +127,7 @@ def current_source_version(db, source: Source) -> SourceVersion:
 
 def parse_source_command(source_slug: str) -> None:
     with SessionLocal() as db:
-        source = get_source_by_slug(db, source_slug)
+        source = source_for_command(db, source_slug)
         source_version = current_source_version(db, source)
 
         def operation():
@@ -206,7 +221,7 @@ def ingest_artifact_command(
     content_type: str | None,
 ) -> None:
     with SessionLocal() as db:
-        source = get_source_by_slug(db, source_slug)
+        source = source_for_command(db, source_slug)
 
         def operation():
             artifact = local_file_artifact(file_path, source_url, content_type)
@@ -246,7 +261,7 @@ def ingest_artifact_command(
 
 def load_hpd_violations_command() -> None:
     with SessionLocal() as db:
-        source = get_source_by_slug(db, "hpd-violations")
+        source = source_for_command(db, "hpd-violations")
 
         def operation():
             artifact = download_url(f"{source.source_url}?$limit=5000")

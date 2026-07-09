@@ -11,6 +11,7 @@ from app.models.source import Source
 from app.query_routing.router import classify_query
 from tests.retrieval_fixtures import (
     TEST_PASSWORD,
+    create_hpd_guidance_quality_corpus,
     create_retrieval_corpus,
     create_rpapl_corpus_with_guidance_noise,
     create_test_user,
@@ -21,6 +22,25 @@ def test_classify_query_routes_property_address():
     route = classify_query("Show HPD violations at 123 MAIN STREET")
 
     assert route.kind == "property"
+
+
+def test_classify_query_routes_broad_hpd_guidance_to_legal():
+    complaint_route = classify_query(
+        "How can a tenant report a housing complaint to HPD?"
+    )
+    enforcement_route = classify_query(
+        "What HPD enforcement information is available for tenants and owners?"
+    )
+
+    assert complaint_route.kind == "legal"
+    assert enforcement_route.kind == "legal"
+
+
+def test_classify_query_routes_explicit_property_lookup_without_identifier():
+    route = classify_query("Show HPD violations")
+
+    assert route.kind == "property"
+    assert route.reason == "property_lookup_missing_identifier"
 
 
 def test_query_endpoint_routes_property_question_to_hpd_results():
@@ -71,6 +91,42 @@ def test_query_endpoint_finds_hpd_address_with_house_number_suffix():
     assert body["route"] == "property"
     assert body["hpd_violations"]["count"] == 1
     assert body["hpd_violations"]["results"][0]["external_id"] == "1003"
+
+
+def test_query_endpoint_answers_hpd_guidance_question():
+    create_hpd_guidance_quality_corpus()
+    create_test_user()
+    client = _authenticated_client()
+
+    response = client.post(
+        "/query",
+        json={"question": "How can a tenant report a housing complaint to HPD?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "legal"
+    assert body["answer"]["answer_status"] == "answered"
+    assert body["answer"]["citations"][0]["source_name"] == (
+        "HPD Tenant and Owner Guidance"
+    )
+
+
+def test_query_endpoint_property_lookup_without_identifier_returns_message():
+    create_test_user()
+    client = _authenticated_client()
+
+    response = client.post(
+        "/query",
+        json={"question": "Show HPD violations"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "property"
+    assert body["message"] == (
+        "Property questions need a building ID, registration ID, or address."
+    )
 
 
 def test_query_endpoint_routes_legal_question_to_answer():

@@ -60,6 +60,51 @@ def second_hpd_guidance_html() -> str:
     """
 
 
+def hpd_index_page_html() -> str:
+    return """
+    <html>
+      <head><title>Enforcement - HPD</title></head>
+      <body>
+        <div class="span3 agencies-about-links">
+          <ul>
+            <li><a href="/site/hpd/services-and-information/enforcement.page">
+              Code Enforcement</a></li>
+            <li><a href="/site/hpd/services-and-information/compliance.page">
+              Compliance</a></li>
+          </ul>
+        </div>
+        <div class="span9 about-main-image">
+          <div class="span6 about-description">
+            <h1 class="sr-only">Enforcement</h1>
+            <ul class="hpd-index-list">
+              <li><a href="/site/hpd/services-and-information/code-enforcement.page">
+                About Code Enforcement</a>Learn how code enforcement and the
+                New York City Housing Maintenance Code.</li>
+              <li><a href="/site/hpd/services-and-information/clear-violations.page">
+                Clear Violations</a>Learn how to clear housing code violations
+                at your property.</li>
+              <li><a href="/site/hpd/services-and-information/ecertification.page">
+                eCertification</a>Certify HPD violations and Housing Quality
+                Standards failures online.</li>
+            </ul>
+            <h2>Housing Quality Enforcement Programs</h2>
+            <ul class="hpd-index-list">
+              <li><a href="/site/hpd/services-and-information/7a-program.page">
+                7A Program</a>Apply to be an administrator for buildings the
+                Court deemed dangerous for tenants.</li>
+              <li><a href="
+                /site/hpd/services-and-information/emergency-repair-program-erp.page">
+                Emergency Repair Program</a>Learn about how the agency takes
+                action to correct conditions when landlords fail to do so.</li>
+            </ul>
+          </div>
+        </div>
+        <footer>© City of New York. 2026 All Rights Reserved.</footer>
+      </body>
+    </html>
+    """
+
+
 def test_parse_hpd_guidance_page_chunks_by_heading_and_removes_chrome():
     sections = parse_hpd_guidance_page(
         "https://www.nyc.gov/site/hpd/services-and-information/heat-and-hot-water.page",
@@ -75,6 +120,26 @@ def test_parse_hpd_guidance_page_chunks_by_heading_and_removes_chrome():
     combined = "\n".join(section.text for section in sections)
     assert "Search all NYC.gov websites" not in combined
     assert "Affordable Housing" not in combined
+    assert "© City of New York" not in combined
+
+
+def test_parse_hpd_guidance_page_extracts_nycgov_index_content():
+    sections = parse_hpd_guidance_page(
+        "https://www.nyc.gov/site/hpd/services-and-information/enforcement.page",
+        "Enforcement",
+        hpd_index_page_html(),
+    )
+
+    assert len(sections) == 2
+    assert sections[0].title == "Enforcement"
+    assert "About Code Enforcement" in sections[0].text
+    assert "Clear Violations" in sections[0].text
+    assert "eCertification" in sections[0].text
+    assert "Housing Quality Enforcement Programs" == sections[1].title
+    assert "7A Program" in sections[1].text
+    assert "Emergency Repair Program" in sections[1].text
+    combined = "\n".join(section.text for section in sections)
+    assert "Compliance" not in combined
     assert "© City of New York" not in combined
 
 

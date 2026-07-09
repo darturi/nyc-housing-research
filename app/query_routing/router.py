@@ -13,6 +13,24 @@ PROPERTY_TERMS = {
     "property",
     "address",
 }
+PROPERTY_LOOKUP_VERBS = (
+    "show",
+    "list",
+    "find",
+    "search",
+    "lookup",
+    "look up",
+    "check",
+    "see",
+    "get",
+)
+PROPERTY_LOOKUP_TERMS = (
+    "violation",
+    "violations",
+    "building id",
+    "registration id",
+    "address",
+)
 
 LEGAL_TERMS = {
     "admin code",
@@ -53,9 +71,18 @@ def classify_query(question: str) -> QueryRoute:
     )
     if has_property_signal and has_identifier:
         return QueryRoute("property", "property_signal_with_identifier")
-    if has_property_signal and not has_legal_signal:
-        return QueryRoute("property", "property_signal")
+    if not has_legal_signal and looks_like_property_lookup(normalized):
+        return QueryRoute("property", "property_lookup_missing_identifier")
     return QueryRoute("legal", "default_legal")
+
+
+def looks_like_property_lookup(normalized_question: str) -> bool:
+    has_lookup_verb = any(
+        re.search(rf"\b{re.escape(verb)}\b", normalized_question)
+        for verb in PROPERTY_LOOKUP_VERBS
+    )
+    has_lookup_term = any(term in normalized_question for term in PROPERTY_LOOKUP_TERMS)
+    return has_lookup_verb and has_lookup_term
 
 
 def hpd_request_from_question(question: str, limit: int) -> HpdViolationSearchRequest:

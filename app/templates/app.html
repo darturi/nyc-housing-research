@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Workspace - {{ app_name }}</title>
+    <link rel="stylesheet" href="/static/web.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">NYC Housing</p>
+        <h1>Research workspace</h1>
+      </div>
+      <div class="userbar">
+        <span>{{ current_user.email }}</span>
+        <button id="logout-button" class="secondary-button" type="button">
+          Sign out
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="query-band" aria-labelledby="query-title">
+        <form id="query-form" class="query-form">
+          <label id="query-title" for="question">Question</label>
+          <div class="query-row">
+            <textarea
+              id="question"
+              name="question"
+              rows="4"
+              maxlength="4000"
+              placeholder="What does the HMC say about heat and hot water?"
+              required
+            ></textarea>
+            <div class="query-controls">
+              <label for="limit">Limit</label>
+              <input id="limit" name="limit" type="number" min="1" max="25" value="5">
+              <button id="query-submit" type="submit">Ask</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="result-band" aria-live="polite">
+        <div id="result-region" class="empty-state">No result yet.</div>
+      </section>
+    </main>
+
+    <script src="/static/web.js" defer></script>
+  </body>
+</html>

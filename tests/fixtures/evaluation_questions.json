@@ -10,7 +10,7 @@
     "required_source_type": "law",
     "required_source_name_contains": "Housing Maintenance Code",
     "required_citation_contains": "27-2005",
-    "required_answer_terms": ["Duties of owner"]
+    "required_answer_terms": ["good repair", "premises"]
   },
   {
     "id": "hmc-heat-hot-water",
@@ -23,7 +23,14 @@
     "required_source_type": "law",
     "required_source_name_contains": "Housing Maintenance Code",
     "required_citation_contains": "27-2029",
-    "required_answer_terms": ["temperature"]
+    "required_answer_terms": [
+      "October",
+      "May",
+      "six a.m.",
+      "ten p.m.",
+      "sixty-eight",
+      "sixty-two"
+    ]
   },
   {
     "id": "hpd-report-complaint",
@@ -35,7 +42,7 @@
     "min_citation_count": 1,
     "required_source_type": "guidance",
     "required_source_name_contains": "HPD",
-    "required_answer_terms": ["complaint"]
+    "required_answer_terms": ["complaint", "311"]
   },
   {
     "id": "hpd-enforcement",
@@ -47,7 +54,7 @@
     "min_citation_count": 1,
     "required_source_type": "guidance",
     "required_source_name_contains": "HPD",
-    "required_answer_terms": ["enforcement"]
+    "required_answer_terms": ["enforcement", "violations", "eCertification"]
   },
   {
     "id": "unsupported-case-law",

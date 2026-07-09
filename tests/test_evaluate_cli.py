@@ -69,6 +69,37 @@ def test_evaluate_expectations_reports_actionable_failures():
     assert "expected answer to contain 'complaint'" in failures
 
 
+def test_evaluate_expectations_catches_thin_heat_answer():
+    answer = answer_result(
+        answer_status="answered",
+        answer="Based on NYC Admin Code § 27-2029, Minimum temperature.",
+        citations=[
+            AnswerCitation(
+                chunk_id="chunk-heat",
+                citation="NYC Admin Code § 27-2029",
+                source_name="NYC Housing Maintenance Code",
+                source_url="https://example.com/hmc",
+            )
+        ],
+    )
+
+    failures = evaluate.evaluate_expectations(
+        {
+            "expected_status": "answered",
+            "min_citation_count": 1,
+            "required_source_type": "law",
+            "required_citation_contains": "27-2029",
+            "required_answer_terms": ["October", "sixty-eight", "sixty-two"],
+        },
+        answer,
+        {"chunk-heat": "law"},
+    )
+
+    assert "expected answer to contain 'October'" in failures
+    assert "expected answer to contain 'sixty-eight'" in failures
+    assert "expected answer to contain 'sixty-two'" in failures
+
+
 def test_evaluate_questions_returns_zero_when_expectations_pass(
     monkeypatch,
     tmp_path,

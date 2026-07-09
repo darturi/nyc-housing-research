@@ -84,7 +84,9 @@ def row_to_search_result(row, score: float, match_type: str) -> SearchResult:
         source_name=source.name,
         source_type=source.source_type,
         jurisdiction=source.jurisdiction,
-        source_url=source_version.source_url or source.source_url,
+        source_url=(
+            document.source_url or source_version.source_url or source.source_url
+        ),
         citation=chunk.citation,
         title=chunk.title,
         text=chunk.text,

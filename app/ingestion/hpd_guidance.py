@@ -423,6 +423,14 @@ def parse_hpd_guidance_page(
     fallback_title: str,
     html: str,
 ) -> list[ParsedSection]:
+    content_parser = HpdGuidanceContentParser(
+        fallback_title=fallback_title or title_from_url(url)
+    )
+    content_parser.feed(html)
+    content_parser.close()
+    if content_parser.sections:
+        return content_parser.sections
+
     parser = HpdGuidanceParser(fallback_title=fallback_title or title_from_url(url))
     parser.feed(html)
     parser.close()
@@ -498,6 +506,112 @@ def has_skip_attr(attrs) -> bool:
             if SKIP_ATTR_PATTERN.search(value):
                 return True
     return False
+
+
+def is_hpd_content_container(attrs) -> bool:
+    for name, value in attrs:
+        if name == "class" and value:
+            classes = set(value.split())
+            if "about-description" in classes:
+                return True
+    return False
+
+
+class HpdGuidanceContentParser(HTMLParser):
+    def __init__(self, fallback_title: str) -> None:
+        super().__init__()
+        self.fallback_title = fallback_title
+        self.capture_depth = 0
+        self.current_section_title: str | None = None
+        self.current_section_lines: list[str] = []
+        self.sections: list[ParsedSection] = []
+        self.current_block_tag: str | None = None
+        self.current_block_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        if self.capture_depth == 0:
+            if is_hpd_content_container(attrs):
+                self.capture_depth = 1
+            return
+
+        self.capture_depth += 1
+        if tag in HEADING_TAGS or tag in CONTENT_BLOCK_TAGS:
+            self._flush_block()
+            self.current_block_tag = tag
+            self.current_block_parts = []
+        elif tag == "br" and self.current_block_tag:
+            self.current_block_parts.append(" ")
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        if self.capture_depth and tag.lower() == "br" and self.current_block_tag:
+            self.current_block_parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self.capture_depth == 0:
+            return
+        if self.current_block_tag == tag:
+            self._flush_block()
+        self.capture_depth -= 1
+        if self.capture_depth == 0:
+            self._flush_block()
+            self._flush_section()
+
+    def handle_data(self, data: str) -> None:
+        if self.capture_depth == 0 or self.current_block_tag is None:
+            return
+        if data.strip():
+            self.current_block_parts.append(data)
+
+    def close(self) -> None:
+        self._flush_block()
+        self._flush_section()
+        super().close()
+
+    def _flush_block(self) -> None:
+        if self.current_block_tag is None:
+            return
+        text = clean_guidance_line(" ".join(self.current_block_parts))
+        tag = self.current_block_tag
+        self.current_block_tag = None
+        self.current_block_parts = []
+        if not text:
+            return
+        if tag in HEADING_TAGS:
+            self._start_section(text)
+            return
+        if self.current_section_title is None:
+            self._start_section(self.fallback_title)
+        self.current_section_lines.append(text)
+
+    def _start_section(self, title: str) -> None:
+        self._flush_section()
+        self.current_section_title = title
+        self.current_section_lines = []
+
+    def _flush_section(self) -> None:
+        if self.current_section_title is None:
+            return
+        lines = [
+            self.current_section_title,
+            *self.current_section_lines,
+        ]
+        text = normalize_text("\n".join(lines))
+        if len(text) >= 40:
+            order_index = len(self.sections)
+            section_key = section_key_for_title(self.current_section_title, order_index)
+            self.sections.append(
+                ParsedSection(
+                    section_key=section_key,
+                    citation=None,
+                    title=self.current_section_title,
+                    text=text,
+                    order_index=order_index,
+                )
+            )
+        self.current_section_title = None
+        self.current_section_lines = []
 
 
 def document_key_for_url(url: str) -> str:

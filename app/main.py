@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.answers import router as answers_router
 from app.api.auth import router as auth_router
@@ -12,6 +13,8 @@ from app.api.search import router as search_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import request_size_middleware
+from app.web import STATIC_DIR
+from app.web import router as web_router
 
 settings = get_settings()
 configure_logging(settings.log_level, settings.app_env)
@@ -28,6 +31,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.middleware("http")(request_size_middleware)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.include_router(web_router)
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(search_router)

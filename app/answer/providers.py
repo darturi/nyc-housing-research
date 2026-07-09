@@ -198,12 +198,19 @@ def build_fake_answer(chunk: SearchResult) -> str:
     title = clean_title(chunk.title)
     text = normalize_answer_text(chunk.text)
     body = strip_section_heading(text, title)
-    clauses = extract_numbered_clause_summaries(body)
+    clauses = extract_legal_clause_summaries(body)
+    guidance_items = (
+        extract_guidance_item_summaries(body)
+        if chunk.source_type == "guidance"
+        else []
+    )
     sentences = extract_sentence_summaries(body)
 
     parts = [f"Based on {citation}, {title}."]
     if clauses:
         parts.append(f"It addresses: {'; '.join(clauses)}.")
+    elif guidance_items:
+        parts.append(f"It includes: {'; '.join(guidance_items)}.")
     elif sentences:
         parts.append(" ".join(sentences))
     parts.append("This response is limited to the retrieved public-source material.")
@@ -220,38 +227,132 @@ def normalize_answer_text(text: str) -> str:
 
 
 def strip_section_heading(text: str, title: str) -> str:
-    escaped_title = re.escape(title.rstrip("."))
-    return re.sub(
-        rf"^§+\s*\d+[a-zA-Z]?\.\s*{escaped_title}\.?\s*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    ).strip()
+    body = re.sub(r"^§+\s*\d+(?:-\d+)?[a-zA-Z]?\s*", "", text).strip()
+    title_pattern = re.escape(title.rstrip("."))
+    body = re.sub(rf"^{title_pattern}\.?\s*", "", body, flags=re.IGNORECASE).strip()
+    return body
 
 
-def extract_numbered_clause_summaries(text: str, limit: int = 5) -> list[str]:
-    matches = list(
-        re.finditer(
-            r"(?:^|\s)(?:\*\s*)?(?P<label>\d+[a-z]?)\.\s+(?P<body>.*?)(?="
-            r"\s(?:\*\s*)?\d+[a-z]?\.\s+|$)",
-            text,
-            flags=re.IGNORECASE,
-        )
-    )
+def extract_legal_clause_summaries(text: str, limit: int = 5) -> list[str]:
     summaries: list[str] = []
     seen: set[str] = set()
-    for match in matches:
-        label = match.group("label").lower()
-        if label in seen:
+    for label, clause_text in labeled_clauses(text):
+        normalized_label = label.lower()
+        if normalized_label in seen:
             continue
-        summary = truncate_words(first_sentence(match.group("body")), 24)
+        summary = truncate_words(clause_summary_text(clause_text), 34)
         if not summary:
             continue
-        seen.add(label)
-        summaries.append(f"{match.group('label')}. {summary}")
+        seen.add(normalized_label)
+        summaries.append(f"{label} {summary}")
         if len(summaries) >= limit:
             break
     return summaries
+
+
+def labeled_clauses(text: str) -> list[tuple[str, str]]:
+    pattern = re.compile(
+        r"(?:(?<=^)|(?<=\s))(?P<label>[a-z]\.|\(\d+[a-z]?\)|\d+[a-z]?\.)\s+"
+        r"(?P<body>.*?)(?=\s(?:[a-z]\.|\(\d+[a-z]?\)|\d+[a-z]?\.)\s+|$)",
+        flags=re.IGNORECASE,
+    )
+    clauses: list[tuple[str, str]] = []
+    for match in pattern.finditer(text):
+        label = match.group("label")
+        body = normalize_answer_text(match.group("body")).strip()
+        if not body:
+            continue
+        clauses.append((label, body))
+    return clauses
+
+
+def clause_summary_text(text: str) -> str:
+    subclauses = labeled_clauses(text)
+    if subclauses:
+        return "; ".join(
+            f"{label} {clean_clause_summary(first_sentence(body))}"
+            for label, body in subclauses[:3]
+        )
+    return clean_clause_summary(first_sentence(text))
+
+
+def clean_clause_summary(text: str) -> str:
+    summary = normalize_answer_text(text).strip()
+    summary = re.sub(r"\s*;?\s+and$", "", summary, flags=re.IGNORECASE)
+    return summary.rstrip(" ;:")
+
+
+def extract_numbered_clause_summaries(text: str, limit: int = 5) -> list[str]:
+    summaries: list[str] = []
+    seen: set[str] = set()
+    for label, clause_text in labeled_clauses(text):
+        if not re.fullmatch(r"\d+[a-z]?\.", label, flags=re.IGNORECASE):
+            continue
+        label_key = label.lower()
+        if label_key in seen:
+            continue
+        summary = truncate_words(first_sentence(clause_text), 24)
+        if not summary:
+            continue
+        seen.add(label_key)
+        summaries.append(f"{label} {summary}")
+        if len(summaries) >= limit:
+            break
+    return summaries
+
+
+GUIDANCE_ACTION_WORDS = (
+    "Learn",
+    "Certify",
+    "Apply",
+    "Find",
+    "Report",
+    "File",
+    "Get",
+    "Read",
+    "Use",
+    "Submit",
+)
+GUIDANCE_ACTION_PATTERN = "|".join(GUIDANCE_ACTION_WORDS)
+GUIDANCE_ITEM_START_PATTERN = re.compile(
+    rf"(?<=\.)\s+(?=(?:eCertification|[A-Z0-9][\w'()/&.-]*)"
+    rf"(?:\s+(?:and|or|of|to|for|the|a|an|in|on|with|"
+    rf"eCertification|[A-Z0-9][\w'()/&.-]*)){{0,8}}"
+    rf"\s+(?:{GUIDANCE_ACTION_PATTERN})\b)"
+)
+GUIDANCE_ITEM_PATTERN = re.compile(
+    rf"^(?P<title>.+?)\s+(?P<body>(?:{GUIDANCE_ACTION_PATTERN})\b.+)$"
+)
+
+
+def extract_guidance_item_summaries(text: str, limit: int = 5) -> list[str]:
+    summaries: list[str] = []
+    seen: set[str] = set()
+    for item in split_guidance_items(text):
+        match = GUIDANCE_ITEM_PATTERN.match(item)
+        if not match:
+            continue
+        title = clean_guidance_item_title(match.group("title"))
+        if not title or title.lower() in seen:
+            continue
+        description = truncate_words(first_sentence(match.group("body")), 18)
+        summaries.append(f"{title}: {description}" if description else title)
+        seen.add(title.lower())
+        if len(summaries) >= limit:
+            break
+    return summaries
+
+
+def split_guidance_items(text: str) -> list[str]:
+    return [
+        item.strip(" .;:")
+        for item in GUIDANCE_ITEM_START_PATTERN.split(normalize_answer_text(text))
+        if item.strip(" .;:")
+    ]
+
+
+def clean_guidance_item_title(title: str) -> str:
+    return normalize_answer_text(title).strip(" .;:")
 
 
 def extract_sentence_summaries(text: str, limit: int = 2) -> list[str]:
@@ -264,7 +365,14 @@ def extract_sentence_summaries(text: str, limit: int = 2) -> list[str]:
 
 
 def first_sentence(text: str) -> str:
-    return re.split(r"(?<=[.!?])\s+", normalize_answer_text(text).strip())[0]
+    protected = (
+        normalize_answer_text(text)
+        .strip()
+        .replace("a.m.", "a.m<period>")
+        .replace("p.m.", "p.m<period>")
+    )
+    sentence = re.split(r"(?<=[.!?])\s+", protected)[0]
+    return sentence.replace("a.m<period>", "a.m.").replace("p.m<period>", "p.m.")
 
 
 def truncate_words(text: str, limit: int) -> str:
