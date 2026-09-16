@@ -110,27 +110,29 @@ class OpenAICompatibleAnswerProvider(AnswerProvider):
                 + _estimate_tokens(answer_text),
             )
 
-        response_json = self._post_json(
-            "/chat/completions",
-            {
-                "model": self.model_name,
-                "messages": [
-                    {
-                        "role": "system",
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {
+                    "role": "system",
                         "content": (
                             "Return only valid JSON with keys: answer_status "
                             "('answered' or 'unsupported'), answer, and "
-                            "cited_chunk_ids. Cite only chunk IDs from the "
-                            "provided context."
+                            "cited_chunk_ids. Put citations only in "
+                            "cited_chunk_ids; do not include chunk IDs, a "
+                            "citations section, URLs, or a disclaimer in answer. "
+                            "For personal eviction or court scenarios, never "
+                            "predict an outcome or provide tailored legal advice."
                         ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": self.temperature,
-                "max_tokens": self.max_output_tokens,
-                "response_format": {"type": "json_object"},
-            },
-        )
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        if self.supports_custom_temperature:
+            payload["temperature"] = self.temperature
+        payload[self.output_token_parameter] = self.max_output_tokens
+        response_json = self._post_json("/chat/completions", payload)
         content = _choice_content(response_json)
         parsed = _parse_provider_content(content)
         usage = response_json.get("usage", {})
@@ -147,6 +149,19 @@ class OpenAICompatibleAnswerProvider(AnswerProvider):
             prompt_token_count=prompt_tokens,
             completion_token_count=completion_tokens,
             total_token_count=total_tokens,
+        )
+
+    @property
+    def output_token_parameter(self) -> str:
+        if self.provider_name == "openai":
+            return "max_completion_tokens"
+        return "max_tokens"
+
+    @property
+    def supports_custom_temperature(self) -> bool:
+        return not (
+            self.provider_name == "openai"
+            and self.model_name.lower().startswith("gpt-5")
         )
 
     def _post_json(self, path: str, payload: dict) -> dict:

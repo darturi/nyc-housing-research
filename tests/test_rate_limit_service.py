@@ -1,8 +1,10 @@
 from datetime import timedelta
 
+from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.limits.service import (
     check_daily_token_budget,
+    check_monthly_llm_cost_budget,
     check_window_limit,
     record_event,
 )
@@ -86,3 +88,34 @@ def test_daily_token_budget_uses_answer_logs():
     assert not decision.allowed
     assert decision.remaining == 25
     assert decision.reason == "daily_llm_token_budget"
+
+
+def test_monthly_cost_budget_uses_paid_answer_logs(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "monthly_llm_cost_budget_usd", 0.005)
+    with SessionLocal() as db:
+        db.add(
+            AnswerLog(
+                user_id=None,
+                retrieval_log_id=None,
+                question_text="question",
+                question_hash="cost-hash",
+                filters={},
+                retrieved_chunk_ids=[],
+                cited_chunk_ids=[],
+                answer_text="answer",
+                answer_status="answered",
+                llm_provider="openai",
+                llm_model="gpt-5-mini-2025-08-07",
+                prompt_token_count=4000,
+                completion_token_count=900,
+                total_token_count=4900,
+                latency_ms=1,
+                error_message=None,
+            )
+        )
+        db.commit()
+        decision = check_monthly_llm_cost_budget(db)
+
+    assert not decision.allowed
+    assert decision.reason == "monthly_llm_cost_budget"

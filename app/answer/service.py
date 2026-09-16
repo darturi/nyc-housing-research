@@ -1,13 +1,19 @@
+import re
 from time import perf_counter
 
 from sqlalchemy.orm import Session as DbSession
 
-from app.answer.citations import build_public_citations, validate_cited_chunk_ids
+from app.answer.citations import (
+    build_public_citations,
+    remove_internal_chunk_ids,
+    validate_cited_chunk_ids,
+)
 from app.answer.logging import log_answer
 from app.answer.prompts import (
     DEFAULT_SOURCE_COVERAGE,
     LEGAL_INFORMATION_DISCLAIMER,
     build_prompt,
+    is_personal_housing_scenario,
     trim_context,
 )
 from app.answer.providers import LLMProviderError, get_answer_provider
@@ -22,6 +28,22 @@ UNSUPPORTED_ANSWER = (
     "The current corpus does not contain enough retrieved public-source "
     "material to answer that question."
 )
+PERSONAL_SCENARIO_SAFE_RESPONSE = (
+    "I can provide general, cited legal information, but I cannot predict the "
+    "outcome of your eviction or Housing Court case. A qualified housing lawyer "
+    "can assess your specific facts and documents."
+)
+
+
+def contains_personal_outcome_prediction(answer_text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(you|your case)\b.{0,80}\b(will|would|can)\b.{0,40}"
+            r"\b(win|lose|be evicted|succeed|fail)\b|\b(you will win|you will lose)\b",
+            answer_text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def generate_answer(
@@ -116,10 +138,19 @@ def generate_answer(
         context_chunks,
     )
     answer_status = provider_answer.answer_status
-    answer_text = provider_answer.answer_text
+    answer_text = remove_internal_chunk_ids(
+        provider_answer.answer_text,
+        [chunk.chunk_id for chunk in context_chunks],
+    )
     if answer_status == "answered" and not cited_chunk_ids:
         answer_status = "unsupported"
         answer_text = UNSUPPORTED_ANSWER
+    if is_personal_housing_scenario(question) and contains_personal_outcome_prediction(
+        answer_text
+    ):
+        answer_status = "unsupported"
+        answer_text = PERSONAL_SCENARIO_SAFE_RESPONSE
+        cited_chunk_ids = []
 
     public_citations = build_public_citations(cited_chunk_ids, context_chunks)
     latency_ms = int((perf_counter() - started) * 1000)

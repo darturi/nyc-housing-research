@@ -1,0 +1,81 @@
+{
+  "format_version": 1,
+  "sources": [
+    {
+      "slug": "nyc-housing-maintenance-code",
+      "name": "NYC Housing Maintenance Code",
+      "source_type": "law",
+      "publisher": "New York City Council / American Legal Publishing",
+      "jurisdiction": "NYC",
+      "source_url": "https://codelibrary.amlegal.com/codes/newyorkcity/latest/NYCadmin/0-0-0-60027",
+      "download_url": "https://files.amlegal.com/pdffiles/NewYorkCity/Admin/XML.zip",
+      "parser": "hmc_xml_zip",
+      "parser_version": "1",
+      "scope": "Housing Maintenance Code sections in the official Administrative Code XML publication",
+      "required_citations": ["NYC Admin Code § 27-2005", "NYC Admin Code § 27-2029"],
+      "license_status": "official-public-access; redistribution review required",
+      "redistribution_allowed": null
+    },
+    {
+      "slug": "ny-multiple-dwelling-law",
+      "name": "New York Multiple Dwelling Law",
+      "source_type": "law",
+      "publisher": "New York State Senate",
+      "jurisdiction": "NY",
+      "source_url": "https://legislation.nysenate.gov/pdf/laws/MDW?full=true",
+      "download_url": "https://legislation.nysenate.gov/pdf/laws/MDW?full=true",
+      "parser": "state_law_pdf",
+      "parser_version": "2",
+      "scope": "Multiple Dwelling Law in the configured official Senate publication",
+      "required_citations": ["Multiple Dwelling Law § 78"],
+      "license_status": "official-public-access; redistribution review required",
+      "redistribution_allowed": null
+    },
+    {
+      "slug": "ny-rpapl",
+      "name": "New York Real Property Actions and Proceedings Law",
+      "source_type": "law",
+      "publisher": "New York State Senate",
+      "jurisdiction": "NY",
+      "source_url": "https://legislation.nysenate.gov/pdf/laws/RPA?full=true",
+      "download_url": "https://legislation.nysenate.gov/pdf/laws/RPA?full=true",
+      "parser": "state_law_pdf",
+      "parser_version": "2",
+      "scope": "RPAPL in the configured official Senate publication",
+      "required_citations": ["RPAPL § 711"],
+      "license_status": "official-public-access; redistribution review required",
+      "redistribution_allowed": null
+    },
+    {
+      "slug": "ny-real-property-law-good-cause",
+      "name": "New York Real Property Law Good Cause Eviction Provisions",
+      "source_type": "law",
+      "publisher": "New York State Senate",
+      "jurisdiction": "NY",
+      "source_url": "https://legislation.nysenate.gov/pdf/laws/RPP?full=true",
+      "download_url": "https://legislation.nysenate.gov/pdf/laws/RPP?full=true",
+      "parser": "good_cause_pdf",
+      "parser_version": "2",
+      "scope": "Real Property Law Article 6-A, sections 210 through 216, and the section 231-c notice requirement",
+      "required_citations": ["Real Property Law § 210", "Real Property Law § 216", "Real Property Law § 231-C"],
+      "license_status": "official-public-access; redistribution review required",
+      "redistribution_allowed": null
+    },
+    {
+      "slug": "hpd-guidance",
+      "name": "HPD Tenant and Owner Guidance",
+      "source_type": "guidance",
+      "publisher": "NYC Department of Housing Preservation and Development",
+      "jurisdiction": "NYC",
+      "source_url": "https://www.nyc.gov/site/hpd/services-and-information/services-and-information.page",
+      "download_url": "https://www.nyc.gov/site/hpd/services-and-information/services-and-information.page",
+      "parser": "hpd_guidance_bundle",
+      "parser_version": "1",
+      "scope": "Curated official complaint, follow-up, enforcement, clearing, and certification guidance",
+      "required_citations": [],
+      "minimum_documents": 4,
+      "license_status": "official-public-access; redistribution review required",
+      "redistribution_allowed": null
+    }
+  ]
+}

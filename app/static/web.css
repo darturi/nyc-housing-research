@@ -30,7 +30,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -114,8 +115,19 @@ label {
   font-weight: 700;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -173,6 +185,70 @@ textarea {
   width: min(100%, 1180px);
   margin: 0 auto;
   padding: 24px clamp(16px, 4vw, 48px) 48px;
+}
+
+.local-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.nav-button {
+  min-width: 120px;
+}
+
+.app-view {
+  margin-bottom: 20px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.synthetic-panel {
+  margin-top: 36px;
+}
+
+.property-panel {
+  margin-top: 20px;
+}
+
+.property-form {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.property-form button {
+  align-self: end;
+}
+
+.property-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+}
+
+dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+dd {
+  margin: 0;
+  text-align: right;
 }
 
 .query-band,

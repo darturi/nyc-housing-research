@@ -39,7 +39,12 @@ DOMAIN_EXPANSIONS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        re.compile(r"good\s+repair|\brepair\b|\bowner\b|premises", re.IGNORECASE),
+        re.compile(
+            r"good\s+repair|\brepair\b|\bmaintain(?:ed|ing)?\b|"
+            r"\bmaintenance\b|\bowner\b|premises|"
+            r"fit\s+for\s+(?:human\s+)?habitation",
+            re.IGNORECASE,
+        ),
         ("owner", "duties", "repair", "good", "premises"),
     ),
     (
@@ -50,6 +55,45 @@ DOMAIN_EXPANSIONS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
         re.compile(r"\benforcement\b|\bviolations?\b|\binspection\b", re.IGNORECASE),
         ("enforcement", "inspection", "violation", "violations", "correct"),
     ),
+    (
+        re.compile(
+            r"\bnonpayment\b|rent\s+demand|14[-\s]?day\s+demand|"
+            r"\bholdover\b|rent\s+acceptance|rent\s+default",
+            re.IGNORECASE,
+        ),
+        (
+            "nonpayment", "rent", "demand", "fourteen-day", "holdover",
+            "acceptance", "RPAPL", "Real Property Law",
+        ),
+    ),
+    (
+        re.compile(
+            r"good\s+cause.*\b(defin|terms?)|"
+            r"\b(defin|terms?).*good\s+cause",
+            re.I,
+        ),
+        ("RPL", "211", "definitions", "housing accommodation", "landlord", "tenant"),
+    ),
+    (
+        re.compile(
+            r"good\s+cause.*\b(covered|coverage|units?)|\bcovered housing",
+            re.I,
+        ),
+        ("RPL", "214", "covered", "housing", "accommodations"),
+    ),
+    (
+        re.compile(
+            r"good\s+cause.*\b(notice|notification|disclos|applicability)|"
+            r"\b(notice|notification|disclos).*good\s+cause|"
+            r"article\s+6-a.*\bnotice",
+            re.I,
+        ),
+        ("RPL", "231-c", "good", "cause", "eviction", "law", "notice"),
+    ),
+    (
+        re.compile(r"\bcertif(?:y|ication)\b|dismiss(?:al|ed)?|eCertification", re.I),
+        ("clear", "violations", "certification", "dismissal", "eCertification"),
+    ),
 )
 
 FOCUSED_QUERY_TEXTS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
@@ -58,7 +102,12 @@ FOCUSED_QUERY_TEXTS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
         ("temperature", "minimum temperature", "heat"),
     ),
     (
-        re.compile(r"good\s+repair|\brepair\b|\bowner\b|premises", re.IGNORECASE),
+        re.compile(
+            r"good\s+repair|\brepair\b|\bmaintain(?:ed|ing)?\b|"
+            r"\bmaintenance\b|\bowner\b|premises|"
+            r"fit\s+for\s+(?:human\s+)?habitation",
+            re.IGNORECASE,
+        ),
         ("duties owner", "good repair", "repair premises"),
     ),
     (
@@ -68,6 +117,46 @@ FOCUSED_QUERY_TEXTS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
     (
         re.compile(r"\benforcement\b|\bviolations?\b|\binspection\b", re.IGNORECASE),
         ("enforcement", "inspection violation", "owner correction"),
+    ),
+    (
+        re.compile(
+            r"\bnonpayment\b|rent\s+demand|14[-\s]?day\s+demand|"
+            r"\bholdover\b|rent\s+acceptance|rent\s+default",
+            re.IGNORECASE,
+        ),
+        ("RPAPL 711 written demand", "Real Property Law 210 216", "rent demand"),
+    ),
+    (
+        re.compile(
+            r"good\s+cause.*\b(defin|terms?)|\b(defin|terms?).*good\s+cause|"
+            r"article\s+6-a.*\bdefinitions?",
+            re.I,
+        ),
+        ("RPL 211 definitions", "housing accommodation landlord tenant"),
+    ),
+    (
+        re.compile(
+            r"good\s+cause.*\b(covered|coverage|units?)|\bcovered housing",
+            re.I,
+        ),
+        ("RPL 214 covered housing accommodations",),
+    ),
+    (
+        re.compile(
+            r"good\s+cause.*\b(notice|notification|disclos|applicability)|"
+            r"\b(notice|notification|disclos).*good\s+cause|"
+            r"article\s+6-a.*\b(notice|notification)",
+            re.I,
+        ),
+        ("RPL 231-c good cause eviction law notice",),
+    ),
+    (
+        re.compile(r"\bcomplaint\b.*\bfollow|\bfollow.*\bcomplaint|\b311\b", re.I),
+        ("report maintenance issue inspection", "complaint status HPD"),
+    ),
+    (
+        re.compile(r"\bcertif(?:y|ication)\b|dismiss(?:al|ed)?|eCertification", re.I),
+        ("clear violations", "eCertification", "dismiss violation"),
     ),
 )
 
@@ -160,4 +249,13 @@ def lexical_quality_score(result: SearchResult, terms: list[str]) -> float:
         score += 3.0
     if "enforcement" in terms and "enforcement" in title:
         score += 3.0
+    if any(term in terms for term in ("certification", "ecertification", "dismissal")):
+        if any(word in title for word in ("clear violations", "ecertification")):
+            score += 6.0
+    if any(term in terms for term in ("complaint", "311", "follow")):
+        if any(word in title for word in ("report a quality", "report a maintenance")):
+            score += 6.0
+    if any(term in terms for term in ("nonpayment", "holdover", "demand")):
+        if "rpapl" in citation or "real property law" in citation:
+            score += 6.0
     return score

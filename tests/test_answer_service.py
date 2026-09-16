@@ -39,6 +39,53 @@ def test_answer_with_invalid_model_citations_becomes_unsupported(monkeypatch):
         assert answer_log.cited_chunk_ids == []
 
 
+def test_answer_generation_removes_internal_chunk_ids_from_answer_text(monkeypatch):
+    create_retrieval_corpus()
+    user = create_test_user()
+
+    monkeypatch.setattr(
+        "app.answer.service.get_answer_provider",
+        lambda: LeakyCitationProvider(),
+    )
+
+    with SessionLocal() as db:
+        result = generate_answer(
+            db,
+            user,
+            "NYC Admin Code § 27-2005",
+            SearchFilters(),
+            5,
+        )
+
+    assert result.answer == "The owner must keep the premises in good repair."
+
+    with SessionLocal() as db:
+        answer_log = db.query(AnswerLog).one()
+        assert answer_log.answer_text == result.answer
+
+
+def test_personal_eviction_outcome_prediction_is_blocked(monkeypatch):
+    create_retrieval_corpus()
+    user = create_test_user()
+    monkeypatch.setattr(
+        "app.answer.service.get_answer_provider",
+        lambda: OutcomePredictionProvider(),
+    )
+
+    with SessionLocal() as db:
+        result = generate_answer(
+            db,
+            user,
+            "Will I win my nonpayment eviction case?",
+            SearchFilters(),
+            5,
+        )
+
+    assert result.answer_status == "unsupported"
+    assert result.citations == []
+    assert "cannot predict" in result.answer
+
+
 def test_provider_error_is_logged_and_reraised(monkeypatch):
     create_retrieval_corpus()
     user = create_test_user()
@@ -168,6 +215,44 @@ class FailingProvider(AnswerProvider):
         chunks: list[SearchResult],
     ) -> ProviderAnswer:
         raise LLMProviderError("provider failed")
+
+
+class LeakyCitationProvider(AnswerProvider):
+    provider_name = "fake"
+    model_name = "leaky-citation-test"
+
+    def generate(
+        self,
+        prompt: str,
+        question: str,
+        chunks: list[SearchResult],
+    ) -> ProviderAnswer:
+        chunk_id = chunks[0].chunk_id
+        return ProviderAnswer(
+            answer_text=(
+                "The owner must keep the premises in good repair. "
+                f"({chunk_id})\n\nCitations: {chunk_id}"
+            ),
+            cited_chunk_ids=[chunk_id],
+            answer_status="answered",
+        )
+
+
+class OutcomePredictionProvider(AnswerProvider):
+    provider_name = "fake"
+    model_name = "outcome-prediction-test"
+
+    def generate(
+        self,
+        prompt: str,
+        question: str,
+        chunks: list[SearchResult],
+    ) -> ProviderAnswer:
+        return ProviderAnswer(
+            answer_text="You will win your eviction case.",
+            cited_chunk_ids=[chunks[0].chunk_id],
+            answer_status="answered",
+        )
 
 
 def hmc_heat_result() -> SearchResult:

@@ -5,6 +5,7 @@ from app.models.chunk import Chunk
 from app.models.chunk_embedding import ChunkEmbedding
 from app.models.citation import Citation
 from app.models.document import Document
+from app.models.hpd_ingestion_checkpoint import HpdIngestionCheckpoint
 from app.models.hpd_violation import HpdViolation
 from app.models.ingestion_run import IngestionRun
 from app.models.rate_limit_event import RateLimitEvent
@@ -23,6 +24,7 @@ __all__ = [
     "Citation",
     "Document",
     "HpdViolation",
+    "HpdIngestionCheckpoint",
     "IngestionRun",
     "RateLimitEvent",
     "RetrievalLog",

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Any
 
 from sqlalchemy import delete, func, select, text
@@ -194,6 +195,56 @@ def check_daily_token_budget(
         reset_at=reset_at,
         retry_after_seconds=retry_after_seconds,
         reason="daily_llm_token_budget",
+    )
+
+
+def answer_cost_microdollars(prompt_tokens: int, completion_tokens: int) -> int:
+    """Return the configured model cost in microdollars, rounded up."""
+    settings = get_settings()
+    cost_usd = (
+        prompt_tokens * settings.answer_llm_input_cost_per_million_tokens_usd
+        + completion_tokens * settings.answer_llm_output_cost_per_million_tokens_usd
+    ) / 1_000_000
+    return ceil(cost_usd * 1_000_000)
+
+
+def estimate_answer_cost_microdollars() -> int:
+    settings = get_settings()
+    return answer_cost_microdollars(
+        settings.answer_max_context_chars // 4,
+        settings.answer_max_output_tokens,
+    )
+
+
+def check_monthly_llm_cost_budget(db: DbSession) -> RateLimitDecision:
+    """Apply a global preflight budget before a paid provider request starts."""
+    settings = get_settings()
+    now = utc_now()
+    month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
+    _lock_rate_limit_key(db, "global", "llm_cost", "monthly")
+    rows = db.execute(
+        select(AnswerLog.prompt_token_count, AnswerLog.completion_token_count).where(
+            AnswerLog.created_at >= month_start,
+            AnswerLog.llm_provider != "fake",
+        )
+    ).all()
+    used = sum(
+        answer_cost_microdollars(row[0] or 0, row[1] or 0) for row in rows
+    )
+    requested = estimate_answer_cost_microdollars()
+    budget = int(round(settings.monthly_llm_cost_budget_usd * 1_000_000))
+    remaining = max(0, budget - used)
+    if month_start.month == 12:
+        reset_at = datetime(month_start.year + 1, 1, 1, tzinfo=UTC)
+    else:
+        reset_at = datetime(month_start.year, month_start.month + 1, 1, tzinfo=UTC)
+    return RateLimitDecision(
+        allowed=remaining >= requested,
+        limit=budget,
+        remaining=remaining,
+        reset_at=reset_at,
+        retry_after_seconds=max(1, int((reset_at - now).total_seconds())),
+        reason="monthly_llm_cost_budget",
     )
 
 

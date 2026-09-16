@@ -1,4 +1,10 @@
-from app.answer.prompts import LEGAL_INFORMATION_DISCLAIMER, build_prompt, trim_context
+from app.answer.prompts import (
+    LEGAL_INFORMATION_DISCLAIMER,
+    PERSONAL_SCENARIO_INSTRUCTION,
+    build_prompt,
+    is_personal_housing_scenario,
+    trim_context,
+)
 from app.answer.schemas import PromptContext
 from app.retrieval.schemas import SearchResult
 
@@ -19,7 +25,7 @@ def test_build_prompt_includes_rules_question_chunks_and_disclaimer():
     assert "chunk_id: chunk-1" in prompt
     assert "NYC Admin Code § 27-2005" in prompt
     assert "https://example.test/source" in prompt
-    assert "Cite only supplied chunk_id values" in prompt
+    assert "Put citations only in cited_chunk_ids" in prompt
     assert "Coverage statement" in prompt
     assert LEGAL_INFORMATION_DISCLAIMER in prompt
 
@@ -35,6 +41,20 @@ def test_trim_context_limits_chunks_and_characters():
     assert [result.chunk_id for result in trimmed] == ["chunk-1", "chunk-2"]
     assert trimmed[0].text == "a" * 10
     assert trimmed[1].text == "bb"
+
+
+def test_personal_eviction_prompt_prohibits_outcome_prediction():
+    prompt = build_prompt(
+        PromptContext(
+            question="Will I win my nonpayment eviction case?",
+            chunks=[_result("chunk-1")],
+            source_coverage=None,
+            disclaimer=LEGAL_INFORMATION_DISCLAIMER,
+        )
+    )
+
+    assert is_personal_housing_scenario("Will I win my nonpayment eviction case?")
+    assert PERSONAL_SCENARIO_INSTRUCTION in prompt
 
 
 def _result(chunk_id: str, text: str | None = None) -> SearchResult:

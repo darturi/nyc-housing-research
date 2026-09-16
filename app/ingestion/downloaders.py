@@ -1,6 +1,6 @@
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from mimetypes import guess_extension
 from time import sleep
 
@@ -110,14 +110,20 @@ def create_or_get_source_version(
         artifact.content,
         artifact.extension,
     )
+    now = datetime.now(UTC).replace(tzinfo=None)
     db.execute(
         update(SourceVersion)
         .where(SourceVersion.source_id == source.id)
-        .values(is_current=False)
+        .where(SourceVersion.is_current.is_(True))
+        .values(
+            is_current=False,
+            artifact_retained_until=now
+            + timedelta(days=get_settings().artifact_retention_days),
+        )
     )
     source_version = SourceVersion(
         source_id=source.id,
-        retrieved_at=datetime.now(UTC).replace(tzinfo=None),
+        retrieved_at=now,
         source_url=artifact.source_url,
         content_hash=artifact.content_hash,
         artifact_uri=artifact_uri,

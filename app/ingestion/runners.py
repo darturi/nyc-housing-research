@@ -1,12 +1,9 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TypeVar
 
 from sqlalchemy.orm import Session as DbSession
 
 from app.models.ingestion_run import IngestionRun
-
-T = TypeVar("T")
 
 
 def finish_run(
@@ -27,7 +24,7 @@ def finish_run(
     db.commit()
 
 
-def record_ingestion_run(
+def record_ingestion_run[T](
     db: DbSession,
     run_type: str,
     operation: Callable[[], tuple[T, int, int, int]],

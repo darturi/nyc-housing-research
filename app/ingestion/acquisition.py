@@ -50,6 +50,12 @@ ACQUISITION_BY_SLUG = {
         automated_enabled=True,
         note="Official NY Senate PDF endpoint.",
     ),
+    "ny-real-property-law-good-cause": SourceAcquisition(
+        source_slug="ny-real-property-law-good-cause",
+        mode="direct_http",
+        automated_enabled=True,
+        note="Official NY Senate Real Property Law PDF; Article 6-A only.",
+    ),
     "hpd-guidance": SourceAcquisition(
         source_slug="hpd-guidance",
         mode="hpd_guidance_bundle",

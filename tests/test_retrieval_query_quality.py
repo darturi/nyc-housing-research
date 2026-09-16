@@ -40,6 +40,16 @@ def test_hpd_complaint_and_enforcement_queries_expand():
     assert "violation" in enforcement_terms
 
 
+def test_eviction_and_certification_queries_get_focused_statutory_guidance_terms():
+    terms = expand_query_terms("Does a 14-day rent demand apply to nonpayment?")
+    focused = focused_query_texts("How do I use eCertification to clear violations?")
+
+    assert "nonpayment" in terms
+    assert "RPAPL" in terms
+    assert "eCertification" in focused
+    assert "clear violations" in focused
+
+
 def test_rerank_demotes_pure_vector_noise_below_lexical_match():
     results = [
         search_result(

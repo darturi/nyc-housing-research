@@ -68,6 +68,22 @@ MVP_SOURCE_SEEDS = [
         notes="Official public New York State Senate law PDF endpoint.",
     ),
     SourceSeed(
+        slug="ny-real-property-law-good-cause",
+        name="New York Real Property Law Article 6-A (Good Cause Eviction)",
+        source_type="law",
+        publisher="New York State Senate",
+        jurisdiction="NY",
+        source_url="https://legislation.nysenate.gov/pdf/laws/RPP?full=true",
+        access_type="public_web",
+        license_status="public_official",
+        terms_url="https://www.nysenate.gov/policies",
+        redistribution_allowed=None,
+        notes=(
+            "Official New York State Senate Real Property Law artifact; ingest "
+            "only Article 6-A sections 210 through 216."
+        ),
+    ),
+    SourceSeed(
         slug="hpd-guidance",
         name="HPD Tenant and Owner Guidance",
         source_type="guidance",

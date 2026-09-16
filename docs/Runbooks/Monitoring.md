@@ -1,5 +1,8 @@
 # Monitoring and Error Logging Runbook
 
+> Historical hosted-mode runbook. Local installations use `nyc-housing status`
+> and `nyc-housing doctor`; see [Troubleshooting](../Troubleshooting.md).
+
 ## Purpose
 
 Define the minimum monitoring and logging needed to operate the private MVP.

@@ -21,4 +21,5 @@ def test_non_fake_embedding_requires_api_key():
         Settings(
             database_url=SecretStr("sqlite+pysqlite:///:memory:"),
             embedding_provider="openai",
+            embedding_api_key=None,
         )

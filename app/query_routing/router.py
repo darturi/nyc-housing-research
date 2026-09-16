@@ -48,7 +48,7 @@ REGISTRATION_ID_PATTERN = re.compile(
 )
 ZIP_PATTERN = re.compile(r"\b(1\d{4})\b")
 ADDRESS_PATTERN = re.compile(
-    r"\b(\d+[a-zA-Z]?)\s+([A-Za-z][A-Za-z0-9 .'-]*?)"
+    r"\b(\d+(?:-\d+)?[a-zA-Z]?)\s+([A-Za-z][A-Za-z0-9 .'-]*?)"
     r"(?:\s+(?:violations?|hpd|open|closed|complaints?|problems?))?\s*$",
     re.I,
 )
@@ -69,7 +69,7 @@ def classify_query(question: str) -> QueryRoute:
         or REGISTRATION_ID_PATTERN.search(question)
         or ADDRESS_PATTERN.search(question)
     )
-    if has_property_signal and has_identifier:
+    if has_property_signal and has_identifier and not has_legal_signal:
         return QueryRoute("property", "property_signal_with_identifier")
     if not has_legal_signal and looks_like_property_lookup(normalized):
         return QueryRoute("property", "property_lookup_missing_identifier")

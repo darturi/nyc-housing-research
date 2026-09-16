@@ -8,7 +8,7 @@ from app.ingestion.hpd_violations import upsert_hpd_violations
 from app.ingestion.registry import seed_sources
 from app.main import app
 from app.models.source import Source
-from app.query_routing.router import classify_query
+from app.query_routing.router import classify_query, hpd_request_from_question
 from tests.retrieval_fixtures import (
     TEST_PASSWORD,
     create_hpd_guidance_quality_corpus,
@@ -24,6 +24,15 @@ def test_classify_query_routes_property_address():
     assert route.kind == "property"
 
 
+def test_natural_language_property_request_preserves_hyphenated_house_number():
+    request = hpd_request_from_question(
+        "Show HPD violations at 35-20A QUEENS BOULEVARD", 50
+    )
+
+    assert request.house_number == "35-20A"
+    assert request.street_name == "QUEENS BOULEVARD"
+
+
 def test_classify_query_routes_broad_hpd_guidance_to_legal():
     complaint_route = classify_query(
         "How can a tenant report a housing complaint to HPD?"
@@ -34,6 +43,14 @@ def test_classify_query_routes_broad_hpd_guidance_to_legal():
 
     assert complaint_route.kind == "legal"
     assert enforcement_route.kind == "legal"
+
+
+def test_classify_query_keeps_a_citation_question_legal_despite_building_id():
+    route = classify_query(
+        "What does Housing Maintenance Code section 27-2005 require for building ID 1?"
+    )
+
+    assert route.kind == "legal"
 
 
 def test_classify_query_routes_explicit_property_lookup_without_identifier():

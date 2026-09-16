@@ -1,5 +1,11 @@
 # Answer Quality Implementation Plan
 
+Status: **historical hosted-system plan, superseded for execution** by
+`Local_Distribution_Implementation_Plan.md`. Commands and environment assumptions
+below describe the prior PostgreSQL/user-based application and must not be used as
+the local release-candidate runbook. Use `Answer_Quality_User_Runbook.md` for the
+implemented local evaluator/debug workflow.
+
 This plan covers the engineering work needed to improve answer quality while
 the app is still usable with fake local providers.
 

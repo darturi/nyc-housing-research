@@ -1,3 +1,5 @@
+import re
+
 from app.answer.schemas import AnswerCitation
 from app.retrieval.schemas import SearchResult
 
@@ -35,3 +37,18 @@ def build_public_citations(
             )
         )
     return citations
+
+
+def remove_internal_chunk_ids(answer_text: str, chunk_ids: list[str]) -> str:
+    cleaned = answer_text
+    for chunk_id in sorted(set(chunk_ids), key=len, reverse=True):
+        cleaned = cleaned.replace(chunk_id, "")
+    cleaned = re.sub(r"\(\s*\)", "", cleaned)
+    cleaned = re.sub(
+        r"(?im)^[ \t]*(?:citations?|sources?)\s*:\s*[,;|\-\s]*\n?",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"[ \t]+([,.;:])", r"\1", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()

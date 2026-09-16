@@ -1,5 +1,8 @@
 # Ingestion and Maintenance Runbook
 
+> Historical hosted-mode runbook. For the local source lifecycle, use
+> [Coverage](../Coverage.md) and [Updating](../Updating.md).
+
 ## Purpose
 
 Run public-source ingestion, regenerate embeddings, check corpus status, and
@@ -66,10 +69,22 @@ Check ingestion status:
 uv run python -m app.cli.ingest status
 ```
 
+Review source readiness and the estimated remaining embedding cost:
+
+``` text
+uv run python -m app.cli.ingest corpus-report
+```
+
 Verify artifact traceability:
 
 ``` text
 uv run python -m app.cli.ingest verify-traceability
+```
+
+After traceability passes, remove only expired superseded artifacts:
+
+``` text
+uv run python -m app.cli.ingest purge-expired-artifacts
 ```
 
 Generate embeddings:
@@ -113,11 +128,20 @@ uv run python -m app.cli.embeddings generate --source-slug hpd-guidance
 
 ## HPD Violations
 
-Load HPD violations:
+The first load is a resumable full historical citywide snapshot. It stores each
+Socrata response page and a manifest in configured local or S3-compatible
+artifact storage. Subsequent `auto` runs use a 14-day overlapping delta keyed
+by `currentstatusdate` and violation ID; the watermark advances only after the
+run completes.
 
 ``` text
-uv run python -m app.cli.ingest load-hpd-violations
+uv run python -m app.cli.ingest load-hpd-violations --mode full   # initial or reconciliation
+uv run python -m app.cli.ingest load-hpd-violations --mode auto   # weekly
 ```
+
+Schedule `--mode auto` weekly and `--mode full` quarterly for reconciliation.
+Run `ingest-missing` monthly, then review `corpus-report` before generating
+embeddings for changed legal/guidance sources.
 
 ## Post-Ingestion Smoke Tests
 

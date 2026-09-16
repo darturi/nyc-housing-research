@@ -1,5 +1,8 @@
 # Rollback Runbook
 
+> Historical hosted-mode runbook. Local corpus rollback and workspace restore are
+> documented in [Updating](../Updating.md).
+
 ## Purpose
 
 Provide clear steps for reverting a problematic release while protecting the

@@ -111,13 +111,18 @@ SECTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 STATE_LAW_SECTION_PATTERN = re.compile(
-    r"(?m)^\s*§+\s*(?P<section_number>\d+[a-z]?)\s*\.\s*(?P<title>.+)$",
+    r"(?m)^\s*(?:[-*]\s*)?§+\s*"
+    r"(?P<section_number>\d+(?:-[a-z]+|[a-z])?)\s*\.\s*(?P<title>.+)$",
     re.IGNORECASE,
+)
+STATE_LAW_TOC_LINE_PATTERN = re.compile(
+    r"^\s*\d+(?:-[a-z]+|[a-z])?\.\s+\S+", re.IGNORECASE
 )
 
 STATE_LAW_CITATION_PREFIXES = {
     "ny-multiple-dwelling-law": "Multiple Dwelling Law",
     "ny-rpapl": "RPAPL",
+    "ny-real-property-law-good-cause": "Real Property Law",
 }
 
 
@@ -193,7 +198,54 @@ def split_sections(
                 order_index=index,
             )
         )
+    if source_slug in STATE_LAW_CITATION_PREFIXES:
+        return _deduplicate_state_law_sections(sections)
     return sections
+
+
+def _deduplicate_state_law_sections(
+    sections: list[ParsedSection],
+) -> list[ParsedSection]:
+    """Remove PDF table-of-contents headings that repeat a real section.
+
+    The Senate's full-law PDFs can begin a contents block with a ``§`` heading.
+    Text extraction then makes that heading indistinguishable from a section until
+    the following lines are inspected. When a citation occurs more than once, keep
+    the candidate with the fewest contents-style numbered lines, then the richer
+    lead line and body. Unique citations are preserved unchanged.
+    """
+
+    selected: dict[str, ParsedSection] = {}
+    first_positions: dict[str, int] = {}
+    for position, section in enumerate(sections):
+        first_positions.setdefault(section.section_key, position)
+        current = selected.get(section.section_key)
+        if current is None or _state_section_quality(section) > _state_section_quality(
+            current
+        ):
+            selected[section.section_key] = section
+    ordered = sorted(
+        selected.values(), key=lambda section: first_positions[section.section_key]
+    )
+    return [
+        ParsedSection(
+            section_key=section.section_key,
+            citation=section.citation,
+            title=section.title,
+            text=section.text,
+            order_index=index,
+        )
+        for index, section in enumerate(ordered)
+    ]
+
+
+def _state_section_quality(section: ParsedSection) -> tuple[int, int, int]:
+    lines = section.text.splitlines()
+    toc_lines = sum(
+        bool(STATE_LAW_TOC_LINE_PATTERN.match(line)) for line in lines[1:]
+    )
+    lead_punctuation = lines[0].count(".") if lines else 0
+    return (-toc_lines, lead_punctuation, len(section.text))
 
 
 def section_pattern_for_source(source_slug: str | None) -> re.Pattern:
@@ -254,6 +306,20 @@ def parse_legal_document(
     raw_text: str,
 ) -> tuple[int, int, int]:
     parsed_sections = split_sections(raw_text, source.slug)
+    if source.slug == "ny-real-property-law-good-cause":
+        parsed_sections = [
+            section
+            for section in parsed_sections
+            if section.citation
+            in {
+                *(f"Real Property Law § {number}" for number in range(210, 217)),
+                "Real Property Law § 231-C",
+            }
+        ]
+        if not parsed_sections:
+            raise ValueError(
+                "Good Cause source did not contain the supported provisions."
+            )
     return parse_legal_sections(db, source, source_version, parsed_sections)
 
 

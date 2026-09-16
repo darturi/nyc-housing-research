@@ -7,6 +7,7 @@ from app.limits.service import (
     answer_limit_for_user,
     check_and_record_window_event,
     check_daily_token_budget,
+    check_monthly_llm_cost_budget,
     check_window_limit,
     client_ip_from_request,
     estimate_answer_tokens,
@@ -96,35 +97,46 @@ def enforce_answer_limit(
     current_user: User,
 ) -> None:
     settings = get_settings()
-    if not settings.rate_limit_enabled or user_is_exempt(db, current_user.id):
+    if not settings.rate_limit_enabled:
         return
-    decision = check_window_limit(
-        db,
-        "user",
-        current_user.id,
-        "answer_request",
-        answer_limit_for_user(db, current_user.id),
-        3600,
-        "answer_requests_per_hour",
-    )
-    if not decision.allowed:
-        _record_authenticated_rejection(request, db, current_user, decision.reason)
-        raise rate_limit_exception(decision)
+    if not user_is_exempt(db, current_user.id):
+        decision = check_window_limit(
+            db,
+            "user",
+            current_user.id,
+            "answer_request",
+            answer_limit_for_user(db, current_user.id),
+            3600,
+            "answer_requests_per_hour",
+        )
+        if not decision.allowed:
+            _record_authenticated_rejection(request, db, current_user, decision.reason)
+            raise rate_limit_exception(decision)
 
-    budget_decision = check_daily_token_budget(
-        db,
-        current_user.id,
-        estimate_answer_tokens(),
-        token_budget_for_user(db, current_user.id),
-    )
-    if not budget_decision.allowed:
+        budget_decision = check_daily_token_budget(
+            db,
+            current_user.id,
+            estimate_answer_tokens(),
+            token_budget_for_user(db, current_user.id),
+        )
+        if not budget_decision.allowed:
+            _record_authenticated_rejection(
+                request,
+                db,
+                current_user,
+                budget_decision.reason,
+            )
+            raise rate_limit_exception(budget_decision)
+
+    monthly_decision = check_monthly_llm_cost_budget(db)
+    if not monthly_decision.allowed:
         _record_authenticated_rejection(
             request,
             db,
             current_user,
-            budget_decision.reason,
+            monthly_decision.reason,
         )
-        raise rate_limit_exception(budget_decision)
+        raise rate_limit_exception(monthly_decision)
 
     record_event(
         db,

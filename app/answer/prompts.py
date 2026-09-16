@@ -1,3 +1,5 @@
+import re
+
 from app.answer.schemas import PromptContext
 from app.retrieval.schemas import SearchResult
 
@@ -6,11 +8,31 @@ LEGAL_INFORMATION_DISCLAIMER = (
     "for advice about a specific situation."
 )
 
+LOCAL_ANSWER_PROMPT_VERSION = "local-answer-v1"
+
 DEFAULT_SOURCE_COVERAGE = (
     "This MVP searched the configured public NYC housing-law corpus. It does "
     "not include paid legal databases, proprietary case-law collections, "
     "unpublished materials, or sources that have not been ingested."
 )
+
+PERSONAL_SCENARIO_INSTRUCTION = (
+    "The question appears to concern the reader's own eviction, Housing Court, "
+    "or likely case outcome. Give only general, cited legal information and "
+    "identify facts or documents the reader can gather. Do not predict whether "
+    "the reader will win or lose, state what will happen in their case, or give "
+    "tailored legal advice."
+)
+
+PERSONAL_SCENARIO_PATTERN = re.compile(
+    r"\b(my|me|i|we|our)\b.*\b(evict|eviction|housing\s+court|court\s+case|"
+    r"nonpayment|holdover|landlord)\b|\b(will|can)\s+i\s+(win|lose|be\s+evicted)",
+    re.IGNORECASE,
+)
+
+
+def is_personal_housing_scenario(question: str) -> bool:
+    return bool(PERSONAL_SCENARIO_PATTERN.search(question))
 
 
 def trim_context(
@@ -73,11 +95,16 @@ def build_prompt(context: PromptContext) -> str:
             "Do not provide legal advice. Use only the retrieved chunks below.",
             "If the chunks do not support an answer, say the current corpus does "
             "not contain enough retrieved public-source material to answer.",
-            "Cite only supplied chunk_id values. Do not invent citations, source "
-            "names, URLs, or legal authority.",
+            "Return reader-friendly prose in the answer field. Put citations only "
+            "in cited_chunk_ids; do not include chunk IDs, a citations section, "
+            "URLs, or a disclaimer in the answer text.",
             "Return a direct answer, relevant law or source-backed rule, practical "
-            "implications if supported, exceptions or limits if supported, "
-            "citations, and disclaimer.",
+            "implications if supported, and exceptions or limits if supported.",
+            (
+                PERSONAL_SCENARIO_INSTRUCTION
+                if is_personal_housing_scenario(context.question)
+                else ""
+            ),
             f"Question: {context.question}",
             f"Source coverage: {source_coverage}",
             f"Disclaimer: {context.disclaimer}",

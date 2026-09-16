@@ -1,5 +1,8 @@
 # Backup and Restore Runbook
 
+> Historical hosted-mode runbook. For local workspaces, use the backup and
+> restore commands documented in [Updating](../Updating.md).
+
 ## Purpose
 
 Ensure the production database can be recovered. Backups are not considered

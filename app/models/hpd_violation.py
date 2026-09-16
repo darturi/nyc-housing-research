@@ -31,7 +31,16 @@ class HpdViolation(Base):
     registration_id: Mapped[str | None] = mapped_column(String(120), index=True)
     boro: Mapped[str | None] = mapped_column(String(80))
     house_number: Mapped[str | None] = mapped_column(String(80), index=True)
+    normalized_house_number: Mapped[str | None] = mapped_column(
+        String(80), index=True
+    )
     street_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    normalized_street_name: Mapped[str | None] = mapped_column(
+        String(255), index=True
+    )
+    normalized_full_address: Mapped[str | None] = mapped_column(
+        String(400), index=True
+    )
     zip_code: Mapped[str | None] = mapped_column(String(20), index=True)
     apartment: Mapped[str | None] = mapped_column(String(80))
     violation_class: Mapped[str | None] = mapped_column("class", String(20))

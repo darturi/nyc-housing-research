@@ -54,6 +54,7 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         dimension: int,
         timeout_seconds: int,
         max_retries: int,
+        max_input_chars: int = 24000,
     ) -> None:
         self.provider_name = provider_name
         self.model_name = model_name
@@ -62,9 +63,17 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         self.dimension = dimension
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.max_input_chars = max_input_chars
 
     def embed_text(self, text: str) -> list[float]:
-        return self.embed_batch([text])[0]
+        segments = split_embedding_text(text, self.max_input_chars)
+        vectors = self.embed_batch(segments)
+        if len(vectors) == 1:
+            return vectors[0]
+        return weighted_average_embeddings(
+            vectors,
+            [len(segment) for segment in segments],
+        )
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -120,6 +129,39 @@ def normalize_vector(vector: list[float]) -> list[float]:
     return [value / magnitude for value in vector]
 
 
+def split_embedding_text(text: str, max_chars: int) -> list[str]:
+    if len(text) <= max_chars:
+        return [text]
+
+    segments: list[str] = []
+    remaining = text
+    while len(remaining) > max_chars:
+        split_at = remaining.rfind(" ", 0, max_chars + 1)
+        if split_at <= 0:
+            split_at = max_chars
+        segments.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        segments.append(remaining)
+    return segments
+
+
+def weighted_average_embeddings(
+    vectors: list[list[float]],
+    weights: list[int],
+) -> list[float]:
+    if not vectors or len(vectors) != len(weights):
+        raise EmbeddingProviderError("Embedding segments could not be combined.")
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        raise EmbeddingProviderError("Embedding segment weights were invalid.")
+    combined = [0.0] * len(vectors[0])
+    for vector, weight in zip(vectors, weights, strict=True):
+        for index, value in enumerate(vector):
+            combined[index] += value * weight
+    return normalize_vector([value / total_weight for value in combined])
+
+
 def cosine_similarity(left: list[float], right: list[float]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0
@@ -139,6 +181,7 @@ def get_embedding_provider() -> EmbeddingProvider:
             dimension=settings.embedding_dimension,
             timeout_seconds=settings.embedding_timeout_seconds,
             max_retries=settings.embedding_max_retries,
+            max_input_chars=settings.embedding_max_input_chars,
         )
     raise EmbeddingProviderError(
         f"Unsupported embedding provider: {settings.embedding_provider}"

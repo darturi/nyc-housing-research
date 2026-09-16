@@ -1,6 +1,7 @@
 from sqlalchemy import Select, and_, func, literal, or_, select
 from sqlalchemy.orm import Session as DbSession
 
+from app.ingestion.hpd_violations import normalize_address_part, normalized_full_address
 from app.models.hpd_violation import HpdViolation
 from app.schemas.hpd import (
     HpdViolationResponse,
@@ -62,6 +63,11 @@ def hpd_query(payload: HpdViolationSearchRequest) -> Select:
 
 
 def address_matches(payload: HpdViolationSearchRequest):
+    normalized_house = normalize_address_part(payload.house_number)
+    normalized_street = normalize_address_part(payload.street_name)
+    normalized_address = normalized_full_address(
+        payload.house_number, payload.street_name
+    )
     exact_split_match = and_(
         HpdViolation.house_number == payload.house_number,
         HpdViolation.street_name.ilike(f"%{payload.street_name}%"),
@@ -73,6 +79,11 @@ def address_matches(payload: HpdViolationSearchRequest):
     )
     requested_full_address = f"{payload.house_number} {payload.street_name}"
     return or_(
+        HpdViolation.normalized_full_address == normalized_address,
+        and_(
+            HpdViolation.normalized_house_number == normalized_house,
+            HpdViolation.normalized_street_name.contains(normalized_street or ""),
+        ),
         exact_split_match,
         full_address.ilike(f"%{requested_full_address}%"),
     )

@@ -112,6 +112,10 @@ def test_source_availability_reports_hmc_bulk_xml(capsys):
     assert f"download_url: {AMLEGAL_NYC_ADMIN_XML_ZIP_URL}" in captured.out
     assert f"artifact_member: {HMC_XML_MEMBER}" in captured.out
     assert "ny-rpapl: mode=direct_http automated=true" in captured.out
+    assert (
+        "ny-real-property-law-good-cause: mode=direct_http automated=true"
+        in captured.out
+    )
     assert "hpd-violations: mode=public_api automated=true" in captured.out
 
 
@@ -212,7 +216,7 @@ def test_ingest_source_command_seeds_empty_source_registry(monkeypatch, tmp_path
         source = db.query(Source).filter_by(slug="nyc-housing-maintenance-code").one()
         chunks = db.query(Chunk).filter_by(source_id=source.id).all()
 
-    assert sources == 5
+    assert sources == 6
     assert len(chunks) == 2
 
 

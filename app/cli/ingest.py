@@ -1,12 +1,13 @@
 import argparse
-import json
 import sys
 from dataclasses import replace
+from datetime import UTC, datetime
 from mimetypes import guess_type
 from pathlib import Path
 
 from sqlalchemy import func, or_, select
 
+from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.ingestion.acquisition import (
     acquisition_for_slug,
@@ -14,7 +15,7 @@ from app.ingestion.acquisition import (
     source_availability,
 )
 from app.ingestion.amlegal_xml import parse_hmc_bulk_xml_document
-from app.ingestion.artifacts import artifact_exists, read_artifact
+from app.ingestion.artifacts import artifact_exists, delete_artifact, read_artifact
 from app.ingestion.downloaders import (
     DownloadedArtifact,
     create_or_get_source_version,
@@ -27,11 +28,12 @@ from app.ingestion.hpd_guidance import (
     parse_hpd_guidance_bundle_document,
     parse_hpd_guidance_html_document,
 )
-from app.ingestion.hpd_violations import upsert_hpd_violations
+from app.ingestion.hpd_violations import load_hpd_violations_snapshot
 from app.ingestion.legal_text import artifact_bytes_to_text, parse_legal_document
 from app.ingestion.registry import seed_sources
 from app.ingestion.runners import record_ingestion_run
 from app.models.chunk import Chunk
+from app.models.chunk_embedding import ChunkEmbedding
 from app.models.citation import Citation
 from app.models.document import Document
 from app.models.hpd_violation import HpdViolation
@@ -43,6 +45,7 @@ LEGAL_SOURCE_SLUGS = [
     "nyc-housing-maintenance-code",
     "ny-multiple-dwelling-law",
     "ny-rpapl",
+    "ny-real-property-law-good-cause",
     "hpd-guidance",
 ]
 DIRTY_CHUNK_MARKERS = (
@@ -54,6 +57,7 @@ DIRTY_CHUNK_MARKERS = (
 
 def seed_sources_command() -> None:
     with SessionLocal() as db:
+
         def operation():
             created, updated = seed_sources(db)
             return None, created, updated, 0
@@ -253,27 +257,18 @@ def ingest_artifact_command(
             operation,
             source_id=source.id,
         )
-        print(
-            f"Ingested artifact for {source.slug}: "
-            f"{source_version.content_hash}"
-        )
+        print(f"Ingested artifact for {source.slug}: {source_version.content_hash}")
 
 
-def load_hpd_violations_command() -> None:
+def load_hpd_violations_command(run_mode: str = "auto") -> None:
     with SessionLocal() as db:
         source = source_for_command(db, "hpd-violations")
 
         def operation():
-            artifact = download_url(f"{source.source_url}?$limit=5000")
-            records = json.loads(artifact.content.decode("utf-8"))
-            source_version = create_or_get_source_version(db, source, artifact)
-            _, created, updated, skipped = upsert_hpd_violations(
-                db,
-                source,
-                records,
-                source_version,
+            source_version, created, updated, skipped = load_hpd_violations_snapshot(
+                db, source, requested_mode=run_mode
             )
-            return None, created, updated, skipped
+            return source_version, created, updated, skipped
 
         record_ingestion_run(db, "load_dataset", operation, source_id=source.id)
         print("Loaded HPD violations.")
@@ -436,12 +431,92 @@ def status_command() -> None:
         print(f"{name}: {count}")
 
 
+def corpus_report_command() -> None:
+    """Print source readiness and the estimated remaining embedding cost."""
+    settings = get_settings()
+    total_missing_chars = 0
+    with SessionLocal() as db:
+        for source in db.scalars(select(Source).order_by(Source.slug)):
+            current_version = db.scalar(
+                select(SourceVersion)
+                .where(
+                    SourceVersion.source_id == source.id,
+                    SourceVersion.is_current.is_(True),
+                )
+                .order_by(SourceVersion.retrieved_at.desc())
+                .limit(1)
+            )
+            chunks = count_table(db, Chunk, source_id=source.id)
+            embedded = (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ChunkEmbedding)
+                    .join(Chunk, Chunk.id == ChunkEmbedding.chunk_id)
+                    .where(
+                        Chunk.source_id == source.id,
+                        ChunkEmbedding.embedding_model == settings.embedding_model,
+                    )
+                )
+                or 0
+            )
+            missing_chars = (
+                db.scalar(
+                    select(func.coalesce(func.sum(func.length(Chunk.text)), 0))
+                    .select_from(Chunk)
+                    .where(
+                        Chunk.source_id == source.id,
+                        ~Chunk.id.in_(
+                            select(ChunkEmbedding.chunk_id).where(
+                                ChunkEmbedding.embedding_model
+                                == settings.embedding_model
+                            )
+                        ),
+                    )
+                )
+                or 0
+            )
+            total_missing_chars += int(missing_chars)
+            version = current_version.content_hash[:12] if current_version else "none"
+            print(
+                f"{source.slug}: version={version} chunks={chunks} "
+                f"embedded={embedded} missing_embedding_chars={missing_chars}"
+            )
+    estimated_tokens = total_missing_chars / 4
+    estimated_cost = (
+        estimated_tokens / 1_000_000
+    ) * settings.embedding_cost_per_million_tokens_usd
+    print(f"estimated_embedding_tokens: {estimated_tokens:.0f}")
+    print(f"estimated_embedding_cost_usd: {estimated_cost:.4f}")
+
+
+def purge_expired_artifacts_command() -> None:
+    """Purge only superseded artifacts whose configured retention has elapsed."""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    purged = 0
+    with SessionLocal() as db:
+        versions = db.scalars(
+            select(SourceVersion).where(
+                SourceVersion.is_current.is_(False),
+                SourceVersion.artifact_retained_until.is_not(None),
+                SourceVersion.artifact_retained_until <= now,
+                SourceVersion.artifact_purged_at.is_(None),
+            )
+        ).all()
+        for source_version in versions:
+            delete_artifact(source_version.artifact_uri)
+            source_version.artifact_purged_at = now
+            purged += 1
+        db.commit()
+    print(f"purged_artifacts: {purged}")
+
+
 def verify_traceability_command() -> None:
     with SessionLocal() as db:
         source_versions = db.scalars(select(SourceVersion)).all()
         missing_artifacts = [
             source_version.id
             for source_version in source_versions
+            if source_version.artifact_purged_at is None
             if not artifact_exists(source_version.artifact_uri)
         ]
         law_chunks_missing_citation = (
@@ -466,6 +541,10 @@ def verify_traceability_command() -> None:
         )
         chunks_total = count_table(db, Chunk)
     print(f"source_versions: {len(source_versions)}")
+    print(
+        "purged_artifacts: "
+        f"{sum(version.artifact_purged_at is not None for version in source_versions)}"
+    )
     print(f"missing_artifacts: {len(missing_artifacts)}")
     print(f"chunks: {chunks_total}")
     print(f"law_chunks_missing_citation: {law_chunks_missing_citation}")
@@ -480,10 +559,7 @@ def verify_traceability_command() -> None:
 def source_availability_command() -> None:
     for row in source_availability():
         automated = "true" if row.automated_enabled else "false"
-        print(
-            f"{row.source_slug}: mode={row.mode} "
-            f"automated={automated}"
-        )
+        print(f"{row.source_slug}: mode={row.mode} automated={automated}")
         print(f"  name: {row.name}")
         print(f"  url: {row.source_url}")
         if row.download_url:
@@ -498,10 +574,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("seed-sources")
-    subparsers.add_parser("load-hpd-violations")
+    load_hpd = subparsers.add_parser("load-hpd-violations")
+    load_hpd.add_argument("--mode", choices=("auto", "full", "delta"), default="auto")
     subparsers.add_parser("ingest-mvp")
     subparsers.add_parser("ingest-missing")
     subparsers.add_parser("status")
+    subparsers.add_parser("corpus-report")
+    subparsers.add_parser("purge-expired-artifacts")
     subparsers.add_parser("verify-traceability")
     subparsers.add_parser("source-availability")
 
@@ -538,13 +617,17 @@ def main() -> int:
                 args.content_type,
             )
         elif args.command == "load-hpd-violations":
-            load_hpd_violations_command()
+            load_hpd_violations_command(args.mode)
         elif args.command == "ingest-mvp":
             ingest_mvp_command()
         elif args.command == "ingest-missing":
             ingest_missing_command()
         elif args.command == "status":
             status_command()
+        elif args.command == "corpus-report":
+            corpus_report_command()
+        elif args.command == "purge-expired-artifacts":
+            purge_expired_artifacts_command()
         elif args.command == "verify-traceability":
             verify_traceability_command()
         elif args.command == "source-availability":

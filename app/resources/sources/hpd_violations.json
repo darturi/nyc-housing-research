@@ -1,0 +1,37 @@
+{
+  "format_version": 1,
+  "slug": "hpd-housing-maintenance-code-violations",
+  "name": "Housing Maintenance Code Violations",
+  "publisher": "NYC Department of Housing Preservation and Development",
+  "dataset_id": "wvxf-dwi5",
+  "dataset_url": "https://data.cityofnewyork.us/Housing-Development/Housing-Maintenance-Code-Violations/wvxf-dwi5",
+  "endpoint": "https://data.cityofnewyork.us/resource/wvxf-dwi5.json",
+  "api_dialect": "SODA 2.1",
+  "connector_version": "hpd-soda21-v2",
+  "verified_at": "2026-09-14",
+  "row_identifier": "violationid",
+  "status_mapping": {
+    "open": "Open",
+    "closed": "Close"
+  },
+  "fields": [
+    "violationid",
+    "buildingid",
+    "registrationid",
+    "boro",
+    "housenumber",
+    "streetname",
+    "zip",
+    "apartment",
+    "class",
+    "inspectiondate",
+    "approveddate",
+    "certifieddate",
+    "ordernumber",
+    "novid",
+    "novdescription",
+    "currentstatus",
+    "currentstatusdate",
+    "violationstatus"
+  ]
+}

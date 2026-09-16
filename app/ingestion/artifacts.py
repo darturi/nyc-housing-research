@@ -72,6 +72,18 @@ def artifact_exists(artifact_uri: str) -> bool:
     return path.exists()
 
 
+def delete_artifact(artifact_uri: str) -> None:
+    """Delete an artifact already approved for retention expiry."""
+    if artifact_uri.startswith("s3://"):
+        bucket, key = parse_s3_uri(artifact_uri)
+        s3_client().delete_object(Bucket=bucket, Key=key)
+        return
+    path = Path(artifact_uri).resolve()
+    path.relative_to(artifact_root())
+    if path.exists():
+        path.unlink()
+
+
 def write_s3_artifact(
     source_slug: str,
     content_hash: str,

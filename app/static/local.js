@@ -1,0 +1,998 @@
+let csrfToken = null;
+let lastPropertyQuery = null;
+let propertyContinuation = null;
+let lastAnswerJobId = null;
+let activeAnswerJobId = null;
+let activePropertyExportJobId = null;
+let selectedCredentialSlot = "openai";
+let selectedCredentialIsCustom = false;
+let selectedAnswerPricingVerified = true;
+const byId = (id) => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const request = {...options, headers: {...(options.headers || {})}};
+  if (request.method && !["GET", "HEAD"].includes(request.method)) {
+    request.headers["X-CSRF-Token"] = csrfToken;
+    request.headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(path, request);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status}).`);
+  return body;
+}
+
+async function connect(token) {
+  const response = await fetch("/api/v1/session/exchange", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({launch_token: token}),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || "Could not connect this browser.");
+  csrfToken = body.csrf_token;
+  await showApplication();
+}
+
+async function reconnectExistingSession() {
+  const response = await fetch("/api/v1/session/csrf");
+  if (!response.ok) return false;
+  csrfToken = (await response.json()).csrf_token;
+  await showApplication();
+  return true;
+}
+
+async function showApplication() {
+  byId("connect-panel").hidden = true;
+  byId("application").hidden = false;
+  const [, , , , status] = await Promise.all([
+    loadSources(),
+    loadJobs(),
+    loadSettings(),
+    loadUsage(),
+    loadWorkspaceStatus(),
+  ]);
+  if (!status.legal_corpus.active_generation_id) selectView("sources");
+}
+
+function selectView(name) {
+  document.querySelectorAll(".app-view").forEach((view) => { view.hidden = true; });
+  document.querySelectorAll("[data-view]").forEach((item) => {
+    const selected = item.dataset.view === name;
+    item.setAttribute("aria-pressed", String(selected));
+    item.classList.toggle("secondary-button", !selected);
+  });
+  byId(`view-${name}`).hidden = false;
+}
+
+document.querySelectorAll("[data-view]").forEach((button) => {
+  button.addEventListener("click", () => selectView(button.dataset.view));
+});
+
+byId("setup-settings").addEventListener("click", () => selectView("settings"));
+
+byId("launch-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await connect(byId("launch-code").value.trim());
+    byId("launch-code").value = "";
+  } catch (error) {
+    byId("launch-status").textContent = error.message;
+  }
+});
+
+byId("research-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const question = byId("question").value.trim();
+  const target = byId("research-result");
+  target.className = "loading-state";
+  target.textContent = "Retrieving public sources…";
+  try {
+    const selectedMode = byId("research-mode").value;
+    if (["auto", "property"].includes(selectedMode)) {
+      const route = await api("/api/v1/route", {
+        method: "POST",
+        body: JSON.stringify({question, mode: selectedMode}),
+      });
+      if (route.mode === "property") {
+        if (!route.query) {
+          target.className = "empty-state";
+          target.textContent = route.message;
+          return;
+        }
+        await runPropertySearch(route.query);
+        target.className = "result-shell";
+        target.textContent = "Property mode resolved the request below. Confirm the building identity before relying on records.";
+        return;
+      }
+    }
+    if (["auto", "search"].includes(selectedMode)) {
+      const source = byId("research-source").value || undefined;
+      const body = await api("/api/v1/search", {
+        method: "POST",
+        body: JSON.stringify({query: question, ...(source ? {source} : {})}),
+      });
+      renderEvidence(target, body.results, `Generation ${body.generation_id}`);
+    } else {
+      const source = byId("research-source").value || undefined;
+      const allowUnknownCost = !selectedAnswerPricingVerified;
+      if (allowUnknownCost && !window.confirm(
+        "This provider's price is unknown. Send this one-off answer request outside the app's USD budget caps? Provider charges may apply.",
+      )) return;
+      const created = await api("/api/v1/query", {
+        method: "POST",
+        body: JSON.stringify({
+          question,
+          ...(source ? {source} : {}),
+          ...(allowUnknownCost ? {allow_unknown_cost: true} : {}),
+        }),
+      });
+      activeAnswerJobId = created.job_id;
+      byId("answer-cancel").hidden = false;
+      await pollAnswer(created.job_id, target);
+    }
+  } catch (error) {
+    target.className = "error-state";
+    target.textContent = error.message;
+  }
+});
+
+async function pollAnswer(jobId, target) {
+  try {
+    for (;;) {
+      const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+      if (job.evidence.length) {
+        renderEvidence(target, job.evidence, "Evidence retrieved; generating answer…");
+      }
+      if (job.state === "succeeded") {
+        lastAnswerJobId = jobId;
+        renderAnswer(target, job.result);
+        return;
+      }
+      if (["failed", "cancelled"].includes(job.state)) {
+        throw new Error(job.error || "Answer job stopped.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  } finally {
+    if (activeAnswerJobId === jobId) activeAnswerJobId = null;
+    byId("answer-cancel").hidden = true;
+  }
+}
+
+byId("answer-cancel").addEventListener("click", async () => {
+  if (!activeAnswerJobId) return;
+  try {
+    await api(`/api/v1/jobs/${encodeURIComponent(activeAnswerJobId)}/cancel`, {
+      method: "POST",
+      body: "{}",
+    });
+    byId("research-result").textContent = "Cancellation requested…";
+  } catch (error) {
+    byId("research-result").textContent = error.message;
+  }
+});
+
+function renderEvidence(target, rows, heading) {
+  target.className = "result-shell";
+  target.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = heading;
+  target.append(title);
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "No matching installed source text was found.";
+    target.append(empty);
+    return;
+  }
+  const list = document.createElement("ol");
+  list.className = "citation-list";
+  rows.forEach((row) => {
+    const item = document.createElement("li");
+    item.className = "citation-item";
+    const label = document.createElement("strong");
+    label.textContent = row.citation || row.title || row.source_name;
+    const text = document.createElement("p");
+    const evidenceText = row.excerpt || row.text || "";
+    const collapsed = evidenceText.length > 900;
+    text.textContent = collapsed ? `${evidenceText.slice(0, 900)}…` : evidenceText;
+    const source = document.createElement("span");
+    source.className = "citation-source";
+    const effective = row.effective_from
+      ? `effective from ${row.effective_from}${row.effective_to ? ` through ${row.effective_to}` : ""}`
+      : "effective date not supplied";
+    source.textContent = [
+      row.source_name,
+      row.publisher || "publisher not supplied",
+      row.retrieved_at ? `retrieved ${row.retrieved_at}` : null,
+      row.last_checked_at ? `checked ${row.last_checked_at}` : null,
+      effective,
+    ].filter(Boolean).join(" · ");
+    item.append(label, text, source);
+    if (collapsed) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "secondary-button";
+      toggle.textContent = "Show full excerpt";
+      toggle.addEventListener("click", () => {
+        const expanded = toggle.textContent === "Show less";
+        text.textContent = expanded ? `${evidenceText.slice(0, 900)}…` : evidenceText;
+        toggle.textContent = expanded ? "Show full excerpt" : "Show less";
+      });
+      item.append(toggle);
+    }
+    if (row.source_url) {
+      try {
+        const url = new URL(row.source_url);
+        if (url.protocol === "https:") {
+          const link = document.createElement("a");
+          link.href = url.href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = "Open official source";
+          item.append(link);
+        }
+      } catch (_) {
+        // Invalid publisher metadata is shown without creating a link.
+      }
+    }
+    list.append(item);
+  });
+  target.append(list);
+}
+
+function renderAnswer(target, result) {
+  const heading = `${result.status.replaceAll("_", " ")} · ${result.answer_profile_id}`;
+  renderEvidence(target, result.evidence, heading);
+  const answer = document.createElement("p");
+  answer.className = "answer-text";
+  answer.textContent = result.answer;
+  target.insertBefore(answer, target.children[1] || null);
+  const disclaimer = document.createElement("p");
+  disclaimer.className = "meta-line";
+  disclaimer.textContent = result.disclaimer;
+  target.append(disclaimer);
+  if (!result.cost_known) {
+    const costWarning = document.createElement("p");
+    costWarning.className = "meta-line";
+    costWarning.textContent = "Unknown provider cost; this request was outside USD budget caps.";
+    target.append(costWarning);
+  }
+  const actions = document.createElement("div");
+  actions.className = "property-actions";
+  [["Export Markdown", "markdown"], ["Export JSON", "json"]].forEach(([label, format]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = label;
+    button.addEventListener("click", () => exportAnswer(format));
+    actions.append(button);
+  });
+  if (result.status === "provider_error") {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "secondary-button";
+    retry.textContent = "Retry answer";
+    retry.addEventListener("click", () => {
+      byId("research-mode").value = "answer";
+      byId("research-form").requestSubmit();
+    });
+    actions.append(retry);
+  }
+  target.append(actions);
+}
+
+async function exportAnswer(format) {
+  if (!lastAnswerJobId) return;
+  const result = await api(`/api/v1/jobs/${encodeURIComponent(lastAnswerJobId)}/export`, {
+    method: "POST",
+    body: JSON.stringify({format}),
+  });
+  window.location.assign(result.download_url);
+}
+
+async function loadSources() {
+  const body = await api("/api/v1/sources");
+  byId("source-summary").textContent = `${body.readiness}; ${body.chunk_count} chunks; generation ${body.active_generation_id || "none"}.`;
+  const list = byId("source-list");
+  const filter = byId("research-source");
+  list.replaceChildren();
+  filter.replaceChildren();
+  const allSources = document.createElement("option");
+  allSources.value = "";
+  allSources.textContent = "All installed sources";
+  filter.append(allSources);
+  body.sources.forEach((source) => {
+    const item = document.createElement("li");
+    item.className = "citation-item";
+    const title = document.createElement("strong");
+    title.textContent = source.name;
+    const scope = document.createElement("p");
+    scope.textContent = source.scope;
+    const status = document.createElement("span");
+    status.className = "citation-source";
+    status.textContent = source.installed
+      ? `${source.validation_state}; checked ${source.last_checked_at || "unknown"}`
+      : "not installed";
+    item.append(title, scope, status);
+    const update = document.createElement("button");
+    update.type = "button";
+    update.className = "secondary-button";
+    update.textContent = source.installed ? "Update this module" : "Install this module";
+    update.addEventListener("click", () => {
+      const partial = body.is_partial || !body.active_generation_id;
+      if (partial && !window.confirm(
+        "This activates a partial corpus containing only currently installed and selected modules. Continue?",
+      )) return;
+      startCorpusJob("update", source.slug, partial);
+    });
+    item.append(update);
+    list.append(item);
+    if (source.installed) {
+      const option = document.createElement("option");
+      option.value = source.slug;
+      option.textContent = source.name;
+      filter.append(option);
+    }
+  });
+}
+
+async function loadWorkspaceStatus() {
+  const body = await api("/api/v1/status");
+  byId("setup-guidance").hidden = Boolean(
+    body.legal_corpus.active_generation_id,
+  );
+  byId("setup-data-path").textContent = body.data_dir;
+  const target = byId("workspace-summary");
+  target.replaceChildren();
+  const rows = [
+    ["Application", body.application_version],
+    ["Data", body.data_dir],
+    ["Configuration", body.config_file],
+    ["Corpus", body.legal_corpus.readiness],
+    ["Corpus schema", body.schema_versions.corpus],
+    ["State schema", body.schema_versions.state],
+    ["Property cache", `${body.property_cache.entry_count} entries · ${body.property_cache.size_bytes} bytes`],
+    ["Network policy", body.offline ? "offline" : "network available for explicit actions"],
+  ];
+  rows.forEach(([term, value]) => {
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = term;
+    dd.textContent = value;
+    target.append(dt, dd);
+  });
+  byId("diagnostics-status").textContent = body.maintenance.active
+    ? `Maintenance active: ${body.maintenance.operation}.`
+    : "Workspace stores are available.";
+  return body;
+}
+
+async function loadJobs() {
+  const body = await api("/api/v1/jobs?limit=20");
+  const list = byId("job-list");
+  list.replaceChildren();
+  if (!body.jobs.length) {
+    const item = document.createElement("li");
+    item.textContent = "No local jobs have run yet.";
+    list.append(item);
+    return;
+  }
+  body.jobs.forEach((job) => {
+    const item = document.createElement("li");
+    item.className = "citation-item";
+    const title = document.createElement("strong");
+    title.textContent = `${job.job_type.replaceAll("_", " ")} · ${job.state}`;
+    const detail = document.createElement("p");
+    const progress = job.progress_total === null
+      ? String(job.progress_current)
+      : `${job.progress_current}/${job.progress_total}`;
+    detail.textContent = `${job.stage}; progress ${progress}; updated ${job.updated_at}.`;
+    item.append(title, detail);
+    if (job.error_message) {
+      const error = document.createElement("p");
+      error.className = "error-state";
+      error.textContent = job.error_message;
+      item.append(error);
+    }
+    if (["queued", "running", "paused", "cancel_requested"].includes(job.state)) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "secondary-button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => controlJob(job.id, "cancel"));
+      item.append(cancel);
+    }
+    const resumable = job.job_type.startsWith("corpus_")
+      || job.job_type === "property_complete_export";
+    if (["paused", "failed"].includes(job.state) && job.retryable && resumable) {
+      const resume = document.createElement("button");
+      resume.type = "button";
+      resume.className = "secondary-button";
+      resume.textContent = "Resume";
+      resume.addEventListener("click", () => controlJob(job.id, "resume"));
+      item.append(resume);
+    }
+    list.append(item);
+  });
+}
+
+async function controlJob(jobId, action) {
+  const target = byId("source-action-status");
+  try {
+    const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}/${action}`, {
+      method: "POST",
+      body: "{}",
+    });
+    target.textContent = `${action} requested for ${job.job_id || job.id}.`;
+    await loadJobs();
+    if (action === "resume") {
+      if (job.job_type === "property_complete_export") {
+        await pollPropertyExportJob(job.job_id || job.id, target);
+      } else {
+        await pollCorpusJob(job.job_id || job.id);
+      }
+    }
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+async function startCorpusJob(operation, source = null, allowPartial = false) {
+  const target = byId("source-action-status");
+  target.textContent = `${operation === "install" ? "Installing" : "Updating"} official sources…`;
+  try {
+    const job = await api("/api/v1/corpus/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        operation,
+        ...(source ? {source} : {}),
+        ...(allowPartial ? {allow_partial: true} : {}),
+      }),
+    });
+    await loadJobs();
+    await pollCorpusJob(job.id);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+let lastIndexEstimate = null;
+
+async function estimateSemanticIndex() {
+  const target = byId("index-action-status");
+  target.textContent = "Estimating remaining semantic-index work…";
+  try {
+    const estimate = await api("/api/v1/corpus/index-estimate");
+    lastIndexEstimate = estimate;
+    const cost = `$${estimate.estimated_cost_usd}`;
+    const credential = estimate.credential_present
+      ? "credential ready"
+      : "provider credential missing";
+    target.textContent = `${estimate.chunks_requiring_embedding}/${estimate.total_chunks} chunks require embeddings; ${estimate.reusable_chunks} reusable; about ${estimate.estimated_input_tokens} input tokens; estimated ceiling ${cost}; ${credential}.`;
+    byId("index-build").disabled = !estimate.credential_present;
+    return estimate;
+  } catch (error) {
+    lastIndexEstimate = null;
+    byId("index-build").disabled = true;
+    target.textContent = error.message;
+    throw error;
+  }
+}
+
+async function buildSemanticIndex() {
+  const target = byId("index-action-status");
+  try {
+    const estimate = lastIndexEstimate || await estimateSemanticIndex();
+    const ceiling = estimate.estimated_cost_usd;
+    if (estimate.paid && !window.confirm(
+      `Approve semantic indexing with a hard ceiling of $${ceiling}? Provider charges may apply.`,
+    )) return;
+    target.textContent = "Starting semantic-index job…";
+    const job = await api("/api/v1/corpus/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        operation: "index",
+        approve_cost: estimate.paid,
+        max_cost_usd: ceiling,
+      }),
+    });
+    lastIndexEstimate = null;
+    byId("index-build").disabled = true;
+    await loadJobs();
+    await pollCorpusJob(job.id);
+    target.textContent = `Semantic index job ${job.id} completed.`;
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+async function pollCorpusJob(jobId) {
+  const target = byId("source-action-status");
+  for (;;) {
+    const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+    const progress = job.progress_total === null
+      ? String(job.progress_current)
+      : `${job.progress_current}/${job.progress_total}`;
+    target.textContent = `${job.stage}; progress ${progress}; ${job.state}.`;
+    await loadJobs();
+    if (["succeeded", "failed", "cancelled"].includes(job.state)) {
+      await Promise.all([loadSources(), loadWorkspaceStatus()]);
+      if (job.state === "failed") throw new Error(job.error_message || "Corpus job failed.");
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+byId("source-install").addEventListener("click", () => startCorpusJob("install"));
+byId("source-update").addEventListener("click", () => startCorpusJob("update"));
+byId("index-estimate").addEventListener("click", estimateSemanticIndex);
+byId("index-build").addEventListener("click", buildSemanticIndex);
+
+byId("source-verify").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/v1/corpus/verify", {method: "POST", body: "{}"});
+    byId("source-action-status").textContent = `Verified ${result.chunk_count} chunks in generation ${result.generation_id}.`;
+  } catch (error) {
+    byId("source-action-status").textContent = error.message;
+  }
+});
+
+byId("source-rollback").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/v1/corpus/rollback", {method: "POST", body: "{}"});
+    byId("source-action-status").textContent = `Active generation is now ${result.generation_id}.`;
+    await loadSources();
+  } catch (error) {
+    byId("source-action-status").textContent = error.message;
+  }
+});
+
+async function loadSettings() {
+  const [settings, profiles, credentials] = await Promise.all([
+    api("/api/v1/settings"),
+    api("/api/v1/profiles"),
+    api("/api/v1/credentials"),
+  ]);
+  byId("monthly-budget").value = settings.monthly_budget_usd;
+  byId("operation-budget").value = settings.per_operation_budget_usd;
+  byId("paid-concurrency").value = String(settings.max_concurrent_paid_requests);
+  byId("answer-deadline").value = String(settings.answer_deadline_seconds);
+  byId("property-cache-max").value = settings.property_cache_max_mb;
+  byId("property-cache-retention").value = settings.property_cache_retention_days;
+  byId("operational-retention").value = settings.operational_retention_days;
+  byId("usage-retention").value = settings.usage_retention_months;
+  byId("offline-mode").checked = settings.offline;
+  populateProfiles("answer-profile", profiles.profiles.filter((p) => p.kind === "answer"), settings.answer_profile);
+  populateProfiles("embedding-profile", profiles.profiles.filter((p) => p.kind === "embedding"), settings.embedding_profile);
+  const selectedProfiles = [
+    profiles.profiles.find((item) => item.id === settings.answer_profile),
+    profiles.profiles.find((item) => item.id === settings.embedding_profile),
+  ];
+  selectedAnswerPricingVerified = selectedProfiles[0]?.pricing_verified !== false;
+  const credentialProfile = selectedProfiles.find(
+    (item) => item?.provider === "openai-compatible",
+  ) || selectedProfiles.find((item) => item && item.provider !== "fake");
+  selectedCredentialSlot = credentialProfile?.credential_slot || "openai";
+  selectedCredentialIsCustom = credentialProfile?.provider === "openai-compatible";
+  byId("provider-key-label").textContent = `Credential for ${selectedCredentialSlot}`;
+  const selectedCredential = credentials.credentials.find(
+    (item) => item.provider === selectedCredentialSlot,
+  );
+  byId("credential-status").textContent = selectedCredential?.present
+    ? `Credential ${selectedCredentialSlot} present via ${selectedCredential.source}; not validated in this session.`
+    : `No credential configured for ${selectedCredentialSlot}.`;
+  byId("credential-validate").disabled = selectedCredentialIsCustom;
+  byId("credential-validate").textContent = selectedCredentialIsCustom
+    ? "Use profiles check in the terminal"
+    : "Validate credential (may charge)";
+}
+
+function populateProfiles(id, profiles, selected) {
+  const select = byId(id);
+  select.replaceChildren();
+  profiles.forEach((profile) => {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.provider === "fake"
+      ? `${profile.model} (synthetic test only)`
+      : `${profile.model} (${profile.provider})`;
+    option.selected = profile.id === selected;
+    select.append(option);
+  });
+}
+
+byId("settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/v1/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        monthly_budget_usd: byId("monthly-budget").value,
+        per_operation_budget_usd: byId("operation-budget").value,
+        max_concurrent_paid_requests: Number.parseInt(byId("paid-concurrency").value, 10),
+        answer_deadline_seconds: Number.parseInt(byId("answer-deadline").value, 10),
+        property_cache_max_mb: Number.parseInt(byId("property-cache-max").value, 10),
+        property_cache_retention_days: Number.parseInt(byId("property-cache-retention").value, 10),
+        operational_retention_days: Number.parseInt(byId("operational-retention").value, 10),
+        usage_retention_months: Number.parseInt(byId("usage-retention").value, 10),
+        answer_profile: byId("answer-profile").value,
+        embedding_profile: byId("embedding-profile").value,
+        offline: byId("offline-mode").checked,
+      }),
+    });
+    byId("settings-status").textContent = "Saved. Restart before starting new model jobs.";
+    await loadUsage();
+  } catch (error) {
+    byId("settings-status").textContent = error.message;
+  }
+});
+
+byId("diagnostics-refresh").addEventListener("click", async () => {
+  try {
+    await loadWorkspaceStatus();
+  } catch (error) {
+    byId("diagnostics-status").textContent = error.message;
+  }
+});
+
+byId("property-cache-clear").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/v1/properties/cache", {
+      method: "DELETE",
+      body: "{}",
+    });
+    byId("cache-clear-status").textContent = `Removed ${result.removed_entries} cached artifacts.`;
+  } catch (error) {
+    byId("cache-clear-status").textContent = error.message;
+  }
+});
+
+async function runRetention(apply) {
+  const target = byId("cache-clear-status");
+  try {
+    const result = await api("/api/v1/maintenance/prune", {
+      method: "POST",
+      body: JSON.stringify({apply}),
+    });
+    const action = result.applied ? "Removed" : "Would remove";
+    target.textContent = `${action} ${result.candidate_jobs} old jobs, ${result.candidate_usage_events} usage events, ${result.candidate_cache_entries} cache entries, and ${result.candidate_log_files} log files. Protected ${result.protected_unresolved_usage_attempts} unresolved usage attempts and ${result.protected_pinned_cache_entries} pinned cache entries.`;
+    if (result.applied) await Promise.all([loadJobs(), loadUsage()]);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+byId("retention-preview").addEventListener("click", () => runRetention(false));
+byId("retention-apply").addEventListener("click", () => runRetention(true));
+
+byId("credential-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = byId("provider-key");
+  try {
+    const result = await api(`/api/v1/credentials/${encodeURIComponent(selectedCredentialSlot)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        credential: input.value,
+        storage: byId("credential-storage").value,
+      }),
+    });
+    input.value = "";
+    byId("credential-status").textContent = `Credential ${selectedCredentialSlot} present via ${result.source}; not yet validated.`;
+  } catch (error) {
+    input.value = "";
+    byId("credential-status").textContent = error.message;
+  }
+});
+
+byId("credential-validate").addEventListener("click", async () => {
+  const target = byId("credential-status");
+  if (selectedCredentialIsCustom) {
+    target.textContent = "Run profiles check for this custom endpoint in the terminal.";
+    return;
+  }
+  try {
+    const estimate = await api(
+      "/api/v1/credentials/openai/validation-estimate",
+    );
+    if (!window.confirm(
+      `Validate the stored OpenAI credential using ${estimate.model}? Approve a hard ceiling of $${estimate.estimated_cost_usd}.`,
+    )) return;
+    target.textContent = "Validating the configured provider capability…";
+    const result = await api("/api/v1/credentials/openai/validate", {
+      method: "POST",
+      body: JSON.stringify({
+        approve_cost: true,
+        max_cost_usd: estimate.estimated_cost_usd,
+      }),
+    });
+    target.textContent = `Credential valid for ${result.model}; recorded cost $${result.cost_usd}.`;
+  } catch (error) {
+    target.textContent = error.message;
+  }
+});
+
+byId("property-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = {
+    building_id: byId("building-id").value.trim() || null,
+    registration_id: byId("registration-id").value.trim() || null,
+    house_number: byId("house-number").value.trim() || null,
+    street_name: byId("street-name").value.trim() || null,
+    borough: byId("borough").value || null,
+    zip_code: byId("zip-code").value.trim() || null,
+    violation_class: byId("violation-class").value || null,
+    status: byId("violation-status").value || null,
+    inspection_date_from: byId("inspection-date-from").value || null,
+    inspection_date_to: byId("inspection-date-to").value || null,
+    limit: 50,
+  };
+  Object.keys(query).forEach((key) => query[key] === null && delete query[key]);
+  await runPropertySearch(query);
+});
+
+async function runPropertySearch(query) {
+  const target = byId("property-result");
+  target.textContent = "Checking the official HPD source or compatible local cache…";
+  byId("property-next").hidden = true;
+  byId("property-refresh").hidden = true;
+  byId("property-summary").hidden = true;
+  byId("property-export").hidden = true;
+  byId("property-export-complete").hidden = true;
+  byId("property-export-cancel").hidden = true;
+  try {
+    const body = await api("/api/v1/properties/search", {
+      method: "POST",
+      body: JSON.stringify(query),
+    });
+    const {refresh: _refresh, ...baseQuery} = query;
+    lastPropertyQuery = baseQuery;
+    propertyContinuation = body.next_cursor || body.continuation;
+    renderProperty(target, body);
+  } catch (error) {
+    target.className = "error-state";
+    target.textContent = error.message;
+  }
+}
+
+function renderProperty(target, body) {
+  target.className = "hpd-table-wrap";
+  target.replaceChildren();
+  const status = document.createElement("p");
+  status.className = "meta-line";
+  const total = body.total_count === null ? "total not requested" : `${body.total_count} total`;
+  const cacheStatus = body.cache_status.replaceAll("_", " ");
+  status.textContent = `${cacheStatus}; fetched ${body.fetch_started_at || body.fetched_at} to ${body.fetch_completed_at || body.fetched_at}; ${body.returned_count} rows (${total}); ${body.is_complete ? "complete loaded scope" : "more or unresolved"}. ${body.notice}`;
+  target.append(status);
+  try {
+    const officialUrl = new URL(body.dataset_url);
+    if (officialUrl.protocol === "https:") {
+      const official = document.createElement("a");
+      official.href = officialUrl.href;
+      official.target = "_blank";
+      official.rel = "noopener noreferrer";
+      official.textContent = "Open official HPD dataset";
+      target.append(official);
+    }
+  } catch (_) {
+    // Invalid packaged publisher metadata is shown without a link.
+  }
+  if (body.requires_selection) {
+    const prompt = document.createElement("p");
+    prompt.textContent = "Select the intended HPD building:";
+    const list = document.createElement("div");
+    list.className = "candidate-list";
+    body.candidates.forEach((candidate) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = `${candidate.house_number} ${candidate.street_name}, ${candidate.borough} · building ${candidate.building_id}`;
+      button.addEventListener("click", () => runPropertySearch({
+        ...lastPropertyQuery,
+        building_id: candidate.building_id,
+        registration_id: null,
+        house_number: null,
+        street_name: null,
+        borough: null,
+        zip_code: null,
+        continuation: null,
+      }));
+      list.append(button);
+    });
+    target.append(prompt, list);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "hpd-table";
+  const caption = document.createElement("caption");
+  caption.textContent = "Loaded HPD Housing Maintenance Code violation records";
+  table.append(caption);
+  const head = document.createElement("thead");
+  const headingRow = document.createElement("tr");
+  ["Violation", "Class", "Inspection", "Status", "Description"].forEach((label) => {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = label;
+    headingRow.append(th);
+  });
+  head.append(headingRow);
+  const bodyElement = document.createElement("tbody");
+  body.records.forEach((record) => {
+    const row = document.createElement("tr");
+    [record.violation_id, record.violation_class, record.inspection_date, record.current_status || record.violation_status, record.description].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value || "—";
+      row.append(cell);
+    });
+    bodyElement.append(row);
+  });
+  table.append(head, bodyElement);
+  target.append(table);
+  byId("property-refresh").hidden = false;
+  byId("property-next").hidden = !body.has_more;
+  byId("property-summary").hidden = !body.records.length;
+  byId("property-export").hidden = !body.records.length;
+  byId("property-export-complete").hidden = !body.records.length || body.requires_selection;
+}
+
+byId("property-refresh").addEventListener("click", async () => {
+  if (lastPropertyQuery) {
+    await runPropertySearch({...lastPropertyQuery, refresh: true});
+  }
+});
+
+byId("property-next").addEventListener("click", async () => {
+  if (lastPropertyQuery && propertyContinuation) {
+    await runPropertySearch({...lastPropertyQuery, continuation: propertyContinuation});
+  }
+});
+
+byId("property-summary").addEventListener("click", async () => {
+  if (!lastPropertyQuery) return;
+  const target = byId("property-result");
+  try {
+    const allowUnknownCost = !selectedAnswerPricingVerified;
+    if (allowUnknownCost && !window.confirm(
+      "This provider's price is unknown. Send this one-off summary request outside the app's USD budget caps? Provider charges may apply.",
+    )) return;
+    const result = await api("/api/v1/properties/summarize", {
+      method: "POST",
+      body: JSON.stringify({
+        ...lastPropertyQuery,
+        ...(allowUnknownCost ? {allow_unknown_cost: true} : {}),
+      }),
+    });
+    const panel = document.createElement("div");
+    panel.className = "result-shell";
+    const title = document.createElement("h3");
+    title.textContent = `Summary · ${result.status}`;
+    const copy = document.createElement("p");
+    copy.textContent = result.summary;
+    const scope = document.createElement("p");
+    scope.className = "meta-line";
+    const cost = result.cost_known
+      ? `cost $${result.cost_usd}`
+      : "unknown cost outside USD budget caps";
+    scope.textContent = `Fixed rows: ${result.property_evidence_ids.join(", ")}; complete: ${result.property_is_complete}; fetched: ${result.property_fetched_at}; ${cost}.`;
+    panel.append(title, copy, scope);
+    target.prepend(panel);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+});
+
+byId("property-export").addEventListener("click", async () => {
+  if (!lastPropertyQuery) return;
+  try {
+    const result = await api("/api/v1/properties/export", {
+      method: "POST",
+      body: JSON.stringify(lastPropertyQuery),
+    });
+    window.location.assign(result.download_url);
+  } catch (error) {
+    byId("property-result").textContent = error.message;
+  }
+});
+
+byId("property-export-complete").addEventListener("click", async () => {
+  if (!lastPropertyQuery) return;
+  const target = byId("property-result");
+  try {
+    const created = await api("/api/v1/exports", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "property_complete",
+        query: {...lastPropertyQuery, continuation: null},
+        max_pages: 20,
+        deadline_seconds: 120,
+      }),
+    });
+    activePropertyExportJobId = created.id;
+    byId("property-export-cancel").hidden = false;
+    await pollPropertyExportJob(created.id, target);
+  } catch (error) {
+    target.textContent = error.message;
+  } finally {
+    activePropertyExportJobId = null;
+    byId("property-export-cancel").hidden = true;
+  }
+});
+
+async function pollPropertyExportJob(jobId, target) {
+  for (;;) {
+    const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+    const pages = job.resume.page_count || job.progress_current;
+    target.textContent = `Full export: ${job.state}; ${pages}/${job.progress_total || 20} pages.`;
+    await loadJobs();
+    if (["succeeded", "failed", "cancelled"].includes(job.state)) {
+      if (job.resume.output_filename) {
+        window.location.assign(`/api/v1/exports/${encodeURIComponent(job.resume.output_filename)}`);
+      } else if (job.state === "failed") {
+        throw new Error(job.error_message || "Complete property export failed.");
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+byId("property-export-cancel").addEventListener("click", async () => {
+  if (!activePropertyExportJobId) return;
+  try {
+    await api(`/api/v1/jobs/${encodeURIComponent(activePropertyExportJobId)}/cancel`, {
+      method: "POST",
+      body: "{}",
+    });
+    byId("property-result").textContent = "Cancelling complete property export…";
+  } catch (error) {
+    byId("property-result").textContent = error.message;
+  }
+});
+
+async function loadUsage() {
+  const body = await api("/api/v1/usage");
+  const target = byId("usage-summary");
+  target.replaceChildren();
+  const rows = [
+    ["Month", body.month],
+    ["Settled", `$${body.settled_usd}`],
+    ["Reserved", `$${body.reserved_usd}`],
+    ["Uncertain", `$${body.uncertain_usd}`],
+    ["Remaining", `$${body.remaining_usd}`],
+    ["Concurrent paid limit", body.max_concurrent_paid_requests],
+    ["Unknown-cost attempts", body.unknown_cost_attempts],
+    ["Unknown-cost unresolved", body.unknown_cost_in_flight + body.unknown_cost_uncertain],
+  ];
+  if (body.history_pruned_before) {
+    rows.push(["History retained since", body.history_pruned_before]);
+  }
+  rows.forEach(([term, value]) => {
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = term;
+    dd.textContent = value;
+    target.append(dt, dd);
+  });
+}
+
+byId("demo-search").addEventListener("click", async () => {
+  const target = byId("demo-result");
+  try {
+    const response = await fetch("/api/v1/demo/search", {method: "POST"});
+    const body = await response.json();
+    target.textContent = `${body.warning} ${body.results[0].excerpt}`;
+  } catch (error) {
+    target.textContent = error.message;
+  }
+});
+
+const fragment = new URLSearchParams(window.location.hash.slice(1));
+const fragmentToken = fragment.get("launch");
+if (fragmentToken) {
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+  connect(fragmentToken).catch((error) => {
+    byId("launch-status").textContent = error.message;
+  });
+} else {
+  reconnectExistingSession().catch(() => false);
+}

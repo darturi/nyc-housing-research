@@ -6,13 +6,13 @@ from app.models.source import Source
 def test_seed_sources_is_idempotent():
     with SessionLocal() as db:
         created, updated = seed_sources(db)
-        assert created == 5
+        assert created == 6
         assert updated == 0
 
         created, updated = seed_sources(db)
         assert created == 0
-        assert updated == 5
-        assert db.query(Source).count() == 5
+        assert updated == 6
+        assert db.query(Source).count() == 6
 
 
 def test_validate_source_seed_requires_public_url_and_license_status():
@@ -36,4 +36,3 @@ def test_validate_source_seed_requires_public_url_and_license_status():
         assert "source_url" in str(exc)
     else:
         raise AssertionError("Expected invalid seed to raise ValueError")
-

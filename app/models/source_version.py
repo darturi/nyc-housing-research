@@ -30,6 +30,12 @@ class SourceVersion(Base):
     effective_start: Mapped[date | None] = mapped_column(Date)
     effective_end: Mapped[date | None] = mapped_column(Date)
     is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    artifact_retained_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    artifact_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -37,4 +43,3 @@ class SourceVersion(Base):
     )
 
     source = relationship("Source", back_populates="versions")
-

@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -23,11 +23,10 @@ from app.models.source import Source
 from app.models.source_version import SourceVersion
 
 HPD_GUIDANCE_URLS = (
-    "https://www.nyc.gov/site/hpd/services-and-information/services-and-information.page",
-    "https://www.nyc.gov/site/hpd/services-and-information/housing-quality-and-safety.page",
-    "https://www.nyc.gov/site/hpd/services-and-information/report-a-housing-complaint.page",
-    "https://www.nyc.gov/site/hpd/services-and-information/tenants-rights.page",
-    "https://www.nyc.gov/site/hpd/services-and-information/enforcement.page",
+    "https://www.nyc.gov/site/hpd/services-and-information/report-a-maintenance-issue.page",
+    "https://www.nyc.gov/site/hpd/services-and-information/clear-violations.page",
+    "https://www.nyc.gov/site/hpd/services-and-information/ecertification.page",
+    "https://www.nyc.gov/site/hpd/services-and-information/alternative-enforcement-program-aep.page",
 )
 HPD_GUIDANCE_ALLOWED_PREFIX = "https://www.nyc.gov/site/hpd/services-and-information/"
 HPD_BUNDLE_FORMAT = "hpd_guidance_bundle_v1"
@@ -223,7 +222,8 @@ def guidance_urls(source_url: str) -> list[str]:
     urls = [source_url, *HPD_GUIDANCE_URLS]
     seen: set[str] = set()
     output: list[str] = []
-    for url in urls:
+    for raw_url in urls:
+        url = canonical_guidance_url(raw_url)
         if url in seen:
             continue
         if not url.startswith(HPD_GUIDANCE_ALLOWED_PREFIX):
@@ -231,6 +231,15 @@ def guidance_urls(source_url: str) -> list[str]:
         seen.add(url)
         output.append(url)
     return output
+
+
+def canonical_guidance_url(url: str) -> str:
+    """Use one identity for a workflow page even when a bundle has variants."""
+    parsed = urlparse(url)
+    if not url.startswith(HPD_GUIDANCE_ALLOWED_PREFIX):
+        raise ValueError(f"HPD guidance URL is outside allowed prefix: {url}")
+    path = parsed.path.rstrip("/")
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
 
 
 def hpd_guidance_bundle_bytes(pages: list[HpdGuidancePage]) -> bytes:
@@ -323,8 +332,9 @@ def parse_hpd_guidance_page_document(
     source_version: SourceVersion,
     page: HpdGuidancePage,
 ) -> tuple[int, int, int]:
-    sections = parse_hpd_guidance_page(page.url, page.title, page.html)
-    document_key = document_key_for_url(page.url)
+    canonical_url = canonical_guidance_url(page.url)
+    sections = parse_hpd_guidance_page(canonical_url, page.title, page.html)
+    document_key = document_key_for_url(canonical_url)
     document = db.scalar(
         select(Document).where(
             Document.source_version_id == source_version.id,
@@ -340,13 +350,13 @@ def parse_hpd_guidance_page_document(
             title=page.title,
             document_type="guidance",
             jurisdiction=source.jurisdiction,
-            source_url=page.url,
+            source_url=canonical_url,
         )
         db.add(document)
         db.flush()
     else:
         document.title = page.title
-        document.source_url = page.url
+        document.source_url = canonical_url
 
     created = 1 if document_created else 0
     updated = 0

@@ -1,0 +1,121 @@
+name: CI
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Python 3.12 / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      NYC_HOUSING_DATA_DIR: ${{ runner.temp }}/nyc-housing-test-data
+      NYC_HOUSING_CONFIG: ${{ runner.temp }}/nyc-housing-test-config/settings.json
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      APP_ENV: test
+      ARTIFACT_STORAGE_BACKEND: local
+      ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
+      EMBEDDING_PROVIDER: fake
+      ANSWER_LLM_PROVIDER: fake
+      NYC_HOUSING_OPENAI_API_KEY: ""
+      NYC_HOUSING_SOCRATA_APP_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+          enable-cache: true
+      - name: Install locked Python 3.12 environment
+        run: uv sync --locked --extra dev
+      - name: Lint
+        run: uv run ruff check .
+      - name: Test
+        run: uv run pytest -q
+      - name: Build distributions
+        run: uv build --no-sources
+      - name: Audit distribution contents
+        shell: bash
+        run: uv run python -m app.maintenance.release_audit dist/*.whl dist/*.tar.gz
+      - name: Smoke-test wheel outside checkout
+        shell: bash
+        run: |
+          temp_root="$(mktemp -d)"
+          uv venv --python 3.12 "$temp_root/venv"
+          uv pip install --python "$temp_root/venv" dist/*.whl
+          "$temp_root/venv/bin/nyc-housing" --data-dir "$temp_root/Space ü/workspace" setup --no-browser --json
+          "$temp_root/venv/bin/nyc-housing" --data-dir "$temp_root/Space ü/workspace" migrate preflight --json
+          "$temp_root/venv/bin/nyc-housing" --data-dir "$temp_root/Space ü/workspace" status --json
+          "$temp_root/venv/bin/nyc-housing" --data-dir "$temp_root/Space ü/workspace" maintenance prune --json
+          "$temp_root/venv/bin/nyc-housing" --data-dir "$temp_root/Space ü/workspace" maintenance prune --apply --json
+          uv venv --python 3.12 "$temp_root/sdist-venv"
+          uv pip install --python "$temp_root/sdist-venv" dist/*.tar.gz
+          "$temp_root/sdist-venv/bin/nyc-housing" --data-dir "$temp_root/Source ü/workspace" setup --skip-core --no-browser --json
+          "$temp_root/sdist-venv/bin/nyc-housing" --data-dir "$temp_root/Source ü/workspace" migrate preflight --json
+        if: runner.os != 'Windows'
+      - name: Smoke-test wheel outside checkout on Windows
+        shell: pwsh
+        run: |
+          $tempRoot = Join-Path $env:RUNNER_TEMP "wheel-smoke"
+          uv venv --python 3.12 "$tempRoot\venv"
+          $wheel = Get-ChildItem dist\*.whl | Select-Object -First 1
+          uv pip install --python "$tempRoot\venv" $wheel.FullName
+          $workspace = Join-Path $tempRoot "Space ü\workspace"
+          & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace setup --no-browser --json
+          & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace migrate preflight --json
+          & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace status --json
+          & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace maintenance prune --json
+          & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace maintenance prune --apply --json
+          uv venv --python 3.12 "$tempRoot\sdist-venv"
+          $sdist = Get-ChildItem dist\*.tar.gz | Select-Object -First 1
+          uv pip install --python "$tempRoot\sdist-venv" $sdist.FullName
+          $sourceWorkspace = Join-Path $tempRoot "Source ü\workspace"
+          & "$tempRoot\sdist-venv\Scripts\nyc-housing.exe" --data-dir $sourceWorkspace setup --skip-core --no-browser --json
+          & "$tempRoot\sdist-venv\Scripts\nyc-housing.exe" --data-dir $sourceWorkspace migrate preflight --json
+        if: runner.os == 'Windows'
+
+  benchmark:
+    name: 10k local retrieval benchmark
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      APP_ENV: test
+      ARTIFACT_STORAGE_BACKEND: local
+      ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
+      EMBEDDING_PROVIDER: fake
+      ANSWER_LLM_PROVIDER: fake
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - run: uv sync --locked
+      - run: uv run nyc-housing benchmark --chunks 10000 --dimension 1536 --runs 20 --json
+
+  browser-e2e:
+    name: Chromium local journey
+    runs-on: ubuntu-latest
+    env:
+      NYC_HOUSING_BROWSER_E2E: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      APP_ENV: test
+      ARTIFACT_STORAGE_BACKEND: local
+      ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
+      EMBEDDING_PROVIDER: fake
+      ANSWER_LLM_PROVIDER: fake
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - run: uv sync --locked --extra dev
+      - name: Install test browser
+        run: uv run playwright install --with-deps chromium
+      - name: Run local browser journey
+        run: uv run pytest tests/e2e/test_local_browser.py -q

@@ -1,5 +1,8 @@
 # Deployment Runbook
 
+> Historical hosted-mode runbook. The supported local-distribution workflow does
+> not require deployment; see [Setup](../Setup.md).
+
 ## Purpose
 
 Deploy the private NYC Housing RAG MVP with production-safe configuration,

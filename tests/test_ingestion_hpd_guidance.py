@@ -180,6 +180,17 @@ def test_download_hpd_guidance_bundle_uses_bounded_page_downloads(monkeypatch):
     assert messages[0].startswith("Downloading HPD guidance page 1/")
 
 
+def test_guidance_bundle_includes_canonical_complaint_and_clearance_workflows():
+    urls = guidance_urls(
+        "https://www.nyc.gov/site/hpd/services-and-information/services-and-information.page"
+    )
+
+    assert any(url.endswith("report-a-maintenance-issue.page") for url in urls)
+    assert any(url.endswith("clear-violations.page") for url in urls)
+    assert any(url.endswith("ecertification.page") for url in urls)
+    assert any(url.endswith("alternative-enforcement-program-aep.page") for url in urls)
+
+
 def test_parse_hpd_guidance_bundle_persists_page_documents_and_uncited_chunks(tmp_path):
     from app.core.config import get_settings
 
@@ -233,9 +244,46 @@ def test_parse_hpd_guidance_bundle_persists_page_documents_and_uncited_chunks(tm
     assert skipped == 0
     assert len(documents) == 2
     assert all(
-        document.source_url.startswith("https://www.nyc.gov/")
-        for document in documents
+        document.source_url.startswith("https://www.nyc.gov/") for document in documents
     )
     assert len(chunks) == 3
     assert all(chunk.citation is None for chunk in chunks)
     assert all(chunk.chunk_type == "guidance_section" for chunk in chunks)
+
+
+def test_guidance_parser_deduplicates_canonical_page_url_variants(tmp_path):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    settings.artifact_storage_backend = "local"
+    settings.artifact_storage_path = str(tmp_path)
+    base_url = (
+        "https://www.nyc.gov/site/hpd/services-and-information/clear-violations.page"
+    )
+    content = hpd_guidance_bundle_bytes(
+        [
+            HpdGuidancePage(base_url, "Clear Violations", hpd_guidance_html()),
+            HpdGuidancePage(
+                base_url + "?ref=landing", "Clear Violations", hpd_guidance_html()
+            ),
+        ]
+    )
+    artifact = DownloadedArtifact(
+        content=content,
+        content_hash=hash_bytes(content),
+        content_type="application/json",
+        byte_size=len(content),
+        extension="json",
+        source_url=base_url,
+    )
+    with SessionLocal() as db:
+        seed_sources(db)
+        source = db.query(Source).filter_by(slug="hpd-guidance").one()
+        version = create_or_get_source_version(db, source, artifact)
+        parse_hpd_guidance_bundle_document(db, source, version, content)
+        documents = db.query(Document).filter_by(source_id=source.id).all()
+        chunks = db.query(Chunk).filter_by(source_id=source.id).all()
+
+    assert len(documents) == 1
+    assert len(chunks) == 2
+    assert documents[0].source_url == base_url

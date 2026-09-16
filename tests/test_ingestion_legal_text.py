@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.db.session import SessionLocal
+from app.ingestion.citations import normalize_citation
 from app.ingestion.downloaders import (
     DownloadedArtifact,
     create_or_get_source_version,
@@ -47,6 +48,39 @@ def test_split_sections_labels_state_law_pdf_sections():
     assert sections[0].citation == "Multiple Dwelling Law § 1"
     assert sections[0].title == "Short title"
     assert sections[1].citation == "Multiple Dwelling Law § 2"
+
+
+def test_state_law_split_removes_duplicate_toc_heading_and_accepts_hyphen_suffix():
+    raw_text = """
+      § 28. Two or more buildings on same lot
+      29. Painting of courts and shafts
+      31. Size of rooms
+      TITLE 1
+      § 28. Two or more buildings on same lot. 1. If two buildings share a lot,
+      access shall be provided as specified by this section.
+      § 170-a. Conversion of dwellings. A qualifying dwelling may be converted.
+    """
+
+    sections = split_sections(raw_text, "ny-multiple-dwelling-law")
+
+    assert [section.citation for section in sections] == [
+        "Multiple Dwelling Law § 28",
+        "Multiple Dwelling Law § 170-A",
+    ]
+    assert "access shall be provided" in sections[0].text
+    assert "Painting of courts" not in sections[0].text
+    assert [section.order_index for section in sections] == [0, 1]
+
+
+def test_spoken_and_hyphenated_citations_normalize() -> None:
+    assert normalize_citation("section seventy eight MDL") == (
+        "Multiple Dwelling Law § 78"
+    )
+    assert normalize_citation("section two hundred ten real property law") == (
+        "Real Property Law § 210"
+    )
+    assert normalize_citation("section seven eleven holdover") == "RPAPL § 711"
+    assert normalize_citation("RPL section 231-c") == "Real Property Law § 231-C"
 
 
 def test_artifact_bytes_to_text_extracts_pdf_text(monkeypatch):

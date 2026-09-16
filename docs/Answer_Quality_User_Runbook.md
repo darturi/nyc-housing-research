@@ -1,156 +1,102 @@
-# Answer Quality User Runbook
+# Answer-quality review runbook
 
-This runbook covers the parts of answer-quality hardening that require project
-owner decisions, credentials, or domain review.
+Use this runbook for the local-distribution release candidate. It separates
+deterministic retrieval evidence, paid answer generation, and substantive legal
+review so one cannot be mistaken for another.
 
-## Goal
+## 1. Establish the reviewed input
 
-Move from local fake-provider answers to MVP-quality answers that are
-production-like, citation-grounded, and reviewed for legal usefulness.
+Run read-only readiness and corpus checks first:
 
-## Step 3: Use The Debug Command Once Implemented
+```bash
+uv run nyc-housing status --json
+uv run nyc-housing corpus verify --json
+uv run nyc-housing evaluate --offline --json
+```
 
-After the debug command is added, use it whenever the web UI returns a weak,
-malformed, unsupported, or surprising answer.
+Record the active corpus generation, source versions/hashes, retrieval metrics,
+answer/embedding profile IDs, profile price dates, and application version. The
+55-case retrieval evaluation makes no provider call and does not assess generated
+answer correctness.
 
-Expected command:
+## 2. Inspect one weak question
 
-```text
-uv run python -m app.cli.debug answer \
-  --user-email admin@example.com \
+```bash
+uv run nyc-housing debug answer \
   --question "What does the HMC say about heat and hot water?" \
-  --limit 5
+  --limit 5 --json
 ```
 
-What to inspect:
+The command uses the same retrieval/provider/ledger path as normal answers and
+reports its operation ID, selected profiles, evidence, answer status, and metered
+events. It never prints the credential or hidden provider prompt. A `fake-*`
+profile is a synthetic interface check, not a legal-quality model result.
 
-- Did retrieval return the correct source and citation?
-- Does the retrieved text actually contain the rule needed to answer?
-- Did the answer provider cite the right chunk?
-- Did the answer omit key facts even though they were present in the chunk?
-- Is the provider `fake` or a real configured provider?
+Interpret a weak result in this order:
 
-How to interpret results:
+- Wrong or missing evidence indicates a retrieval, coverage, or source problem.
+- Good evidence plus an unsupported/weak answer indicates a synthesis or model
+  problem.
+- `provider_error` indicates credentials, network, provider, timeout, or budget;
+  the returned evidence remains usable.
+- A valid evidence marker proves only that the cited excerpt was supplied, not
+  that it substantively supports each sentence.
 
-- Good retrieved chunks plus weak answer means answer synthesis needs work.
-- Bad retrieved chunks means retrieval, chunking, or embeddings need work.
-- No cited chunks means citation validation or provider output failed.
-- `llm_provider=fake` means the output is a local deterministic fallback, not
-  production-like answer generation.
+## 3. Configure and validate a real profile deliberately
 
-## Step 4: Choose Whether MVP Uses A Real Answer Provider
-
-You need to decide whether the MVP should use a real LLM-backed answer provider
-instead of the fake local provider.
-
-Reasons to use a real provider:
-
-- Better plain-language explanations.
-- Better synthesis across multiple retrieved chunks.
-- More natural handling of statutory subdivisions and guidance pages.
-- More realistic MVP testing.
-
-Reasons to delay:
-
-- API cost.
-- Token-budget management.
-- Privacy and data-handling review.
-- More provider failure modes to monitor.
-
-Decision needed from you:
-
-- Provider: OpenAI or another OpenAI-compatible provider.
-- Model name.
-- Whether local development should use the real provider or only staging.
-- Whether questions and retrieved public-source context can be sent to that
-  provider under your privacy requirements.
-
-## Step 5: Configure Credentials
-
-I can wire and test the app against provided credentials, but I cannot create an
-API key, add billing, or decide which account should pay for usage.
-
-When you are ready, set these values in `.env`:
-
-```text
-ANSWER_LLM_PROVIDER=openai
-ANSWER_LLM_MODEL=<chosen-model>
-ANSWER_LLM_API_KEY=<your-api-key>
-ANSWER_LLM_BASE_URL=https://api.openai.com/v1
+```bash
+uv run nyc-housing profiles select answer openai-answer-luna-v1
+uv run nyc-housing profiles select embedding openai-embedding-3-small-v1
+uv run nyc-housing credentials set openai
+uv run nyc-housing credentials validate openai \
+  --approve-cost --max-cost-usd 0.000001 --json
 ```
 
-Optional if you also want production-like semantic retrieval:
+The credential prompt is hidden. Environment-only configuration is supported via
+`NYC_HOUSING_OPENAI_API_KEY`; do not put a key in ordinary settings, a command
+argument, an issue, or a review artifact. Validation is a minimal, potentially
+billable embedding call recorded by the local ledger.
 
-```text
-EMBEDDING_PROVIDER=openai
-EMBEDDING_MODEL=<chosen-embedding-model>
-EMBEDDING_API_KEY=<your-api-key>
-EMBEDDING_BASE_URL=https://api.openai.com/v1
+## 4. Estimate, approve, and run the answer suite
+
+```bash
+uv run nyc-housing evaluate --answers --estimate-only --json
+uv run nyc-housing evaluate --answers \
+  --approve-cost --max-cost-usd 1.00 --json
 ```
 
-After changing embedding settings, regenerate embeddings:
+Use a ceiling at least as large as the reported conservative estimate and no
+larger than the amount deliberately approved. The configured per-operation and
+monthly budgets remain hard limits. The runner uses one traceable operation ID,
+stops on provider failure, and reports settled/uncertain local cost deltas.
 
-```text
-uv run python -m app.cli.embeddings generate
-uv run python -m app.cli.embeddings status
-```
+The 26 legal cases include expected citations or sources, required propositions,
+missing facts for personal scenarios, and conservative unsupported behavior. Two
+property cases remain in the fixture but are reviewed through the separately
+verified property flow. Automated source/citation/status results are a technical
+screen only; the report always says `domain_review_required`.
 
-After changing answer settings, run:
+## 5. Perform proposition-level domain review
 
-```text
-uv run python -m app.cli.evaluate --user-email admin@example.com
-```
+For every case, a qualified housing-law reviewer records pass, needs revision, or
+unsupported as expected after checking:
 
-If you hit the daily token budget during testing, reset local state:
+- direct accuracy and whether every material proposition is supported;
+- exceptions, qualifications, source currency, jurisdiction, and missing facts;
+- whether each citation supports the sentence for which it is used;
+- conservative handling of case law, absent lease text, eligibility questions,
+  and outcome predictions;
+- whether a reasonable tenant or owner could mistake the answer for complete or
+  individualized legal advice.
 
-```text
-uv run python -m app.cli.limits reset-user --email admin@example.com
-```
+Prioritize nonpayment notice, complaint follow-up, eCertification, personal heat
+and eviction scenarios, and Good Cause coverage. A passing old-system answer or
+matching citation string is not sufficient evidence.
 
-## Step 6: Validate Legal Adequacy
+## 6. Go/no-go rule
 
-I can improve grounding, citations, tests, and failure handling. I cannot
-certify that an answer is legally adequate for real tenant, owner, attorney, or
-advocate use.
-
-You should review answers with a qualified legal/domain reviewer before relying
-on them for MVP users.
-
-Recommended review set:
-
-- Owner good-repair duties.
-- Heat and hot water.
-- HPD complaint reporting.
-- HPD enforcement.
-- Unsupported case-law questions.
-- Questions that require sources not yet ingested.
-- Questions with ambiguous or user-specific facts.
-
-For each answer, check:
-
-- Is the direct answer legally accurate?
-- Are material exceptions or limits omitted?
-- Are citations relevant and sufficient?
-- Does the answer avoid legal advice?
-- Does the source coverage disclaimer make the corpus limits clear?
-- Would a reasonable user misunderstand the answer as complete advice?
-
-## What I Cannot Do For You
-
-- Create or manage paid provider accounts.
-- Generate or retrieve your private API keys.
-- Approve provider privacy or data-processing terms.
-- Decide whether token costs are acceptable.
-- Certify legal adequacy.
-- Replace review by a qualified attorney or domain expert.
-
-## Minimum Go/No-Go Checklist
-
-Before treating answers as MVP-quality:
-
-- Evaluation passes with required answer terms.
-- Debug output shows relevant chunks for key questions.
-- Real-provider answers are tested, if a real provider is chosen.
-- Rate limits and token budgets are configured intentionally.
-- Legal/domain review signs off on the initial question set.
-- Unsupported answers remain conservative for out-of-corpus questions.
+Do not claim legal-answer acceptance until the real-profile run is reproducible
+against the recorded corpus/profile versions and every designated must-pass case
+has domain-review approval with no unresolved material correctness issue. Provider
+account creation, billing approval, privacy-terms approval, and legal certification
+remain maintainer/reviewer responsibilities rather than code defaults.

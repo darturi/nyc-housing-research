@@ -1,4 +1,8 @@
-from app.answer.citations import build_public_citations, validate_cited_chunk_ids
+from app.answer.citations import (
+    build_public_citations,
+    remove_internal_chunk_ids,
+    validate_cited_chunk_ids,
+)
 from app.retrieval.schemas import SearchResult
 
 
@@ -25,6 +29,17 @@ def test_build_public_citations_uses_retrieved_metadata():
     assert citations[0].chunk_id == "chunk-1"
     assert citations[0].citation == "NYC Admin Code § 27-2005"
     assert citations[0].source_url == "https://example.test/source"
+
+
+def test_remove_internal_chunk_ids_preserves_reader_facing_prose():
+    answer = (
+        "RPAPL applies to summary proceedings. (chunk-1)\n\n"
+        "Citations: chunk-1"
+    )
+
+    cleaned = remove_internal_chunk_ids(answer, ["chunk-1"])
+
+    assert cleaned == "RPAPL applies to summary proceedings."
 
 
 def _result(chunk_id: str) -> SearchResult:

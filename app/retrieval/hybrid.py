@@ -15,6 +15,32 @@ from app.retrieval.vector import vector_search
 
 SOURCE_HINTS = (
     (
+        re.compile(
+            r"\bHPD\b.*\b(complaint|inspection|certif|dismiss|clear|"
+            r"ecertification)\b|\b(complaint|ecertification|clear\s+violations)\b",
+            re.I,
+        ),
+        "hpd-guidance",
+        "HPD Tenant and Owner Guidance",
+    ),
+    (
+        re.compile(
+            r"\bgood\s+cause\b|rent\s+acceptance|"
+            r"\bRPL\s*(?:§|section)?\s*21[0-6]",
+            re.I,
+        ),
+        "ny-real-property-law-good-cause",
+        "New York Real Property Law Article 6-A (Good Cause Eviction)",
+    ),
+    (
+        re.compile(
+            r"\bnonpayment\b|rent\s+demand|14[-\s]?day\s+demand|\bholdover\b",
+            re.I,
+        ),
+        "ny-rpapl",
+        "New York Real Property Actions and Proceedings Law",
+    ),
+    (
         re.compile(r"\bRPAPL\b|real\s+property\s+actions\s+and\s+proceedings", re.I),
         "ny-rpapl",
         "New York Real Property Actions and Proceedings Law",
