@@ -1,25 +1,56 @@
+# OS and editor files
 .DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local AI agent, skill, and design-tool state
+/.agents/
+/.codex/
+/.claude/
+/.cursor/
+/.impeccable/
+/.skills/
+/skills/
+
+# Environment and local runtime state
 .env
 .env.*
 !.env.example
 .venv/
+
+# Python caches and test output
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.uv-cache/
+.tox/
+.nox/
+.hypothesis/
 .coverage
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Generated artifacts and package output
 .artifacts/
 *.py[cod]
 *.egg-info/
 dist/
 build/
+
+# Local logs, credentials, and databases
 *.log
 cookies.txt
 *.cookies.txt
 *.db
 *.sqlite
 *.sqlite3
+
+# Scratch files
 docs/scratch

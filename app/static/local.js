@@ -175,9 +175,20 @@ byId("answer-cancel").addEventListener("click", async () => {
 function renderEvidence(target, rows, heading) {
   target.className = "result-shell";
   target.replaceChildren();
+  const header = document.createElement("div");
+  header.className = "result-header evidence-header";
   const title = document.createElement("h3");
-  title.textContent = heading;
-  target.append(title);
+  const generationHeading = heading.startsWith("Generation ");
+  title.textContent = generationHeading
+    ? `${rows.length} matching passage${rows.length === 1 ? "" : "s"}`
+    : heading;
+  const meta = document.createElement("span");
+  meta.className = "evidence-meta";
+  meta.textContent = generationHeading
+    ? heading
+    : `${rows.length} cited passage${rows.length === 1 ? "" : "s"}`;
+  header.append(title, meta);
+  target.append(header);
   if (!rows.length) {
     const empty = document.createElement("p");
     empty.textContent = "No matching installed source text was found.";

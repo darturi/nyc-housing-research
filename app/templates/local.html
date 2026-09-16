@@ -6,24 +6,38 @@
     <title>{{ app_name }}</title>
     <link rel="stylesheet" href="/static/web.css">
   </head>
-  <body data-initialized="{{ 'true' if initialized else 'false' }}">
+  <body class="local-app" data-initialized="{{ 'true' if initialized else 'false' }}">
+    <a class="skip-link" href="#main-content">Skip to workspace</a>
     <header class="topbar">
-      <div>
-        <p class="eyebrow">NYC Housing</p>
-        <h1>Local research workspace</h1>
+      <div class="product-brand">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span class="brand-copy">
+          <strong>NYC Housing Research</strong>
+          <span>Private evidence workspace</span>
+        </span>
       </div>
-      <span class="route-badge">{% if offline %}offline{% else %}local{% endif %}</span>
+      <div class="topbar-status">
+        <span class="privacy-indicator"><span aria-hidden="true"></span>Stays on this machine</span>
+        <span class="route-badge">{% if offline %}offline mode{% else %}local mode{% endif %}</span>
+      </div>
     </header>
-    <main class="workspace">
+    <main id="main-content" class="workspace">
       <section id="connect-panel" class="result-shell" aria-labelledby="connect-title">
-        <h2 id="connect-title">Connect this browser</h2>
-        <p>
-          The app listens only on this machine. A one-time launch code prevents
-          unrelated web pages from controlling the local service.
-        </p>
+        <div class="connect-copy">
+          <span class="connect-lock" aria-hidden="true"></span>
+          <div>
+            <h1 id="connect-title">Connect this browser</h1>
+            <p>
+              The app listens only on this machine. A one-time launch code prevents
+              unrelated web pages from controlling the local service.
+            </p>
+          </div>
+        </div>
         <form id="launch-form" class="query-form">
-          <label for="launch-code">One-time launch code</label>
-          <input id="launch-code" autocomplete="off" spellcheck="false">
+          <div class="form-field">
+            <label for="launch-code">One-time launch code</label>
+            <input id="launch-code" autocomplete="off" spellcheck="false">
+          </div>
           <button type="submit">Connect</button>
         </form>
         <p id="launch-status" class="meta-line" aria-live="polite">
@@ -31,99 +45,181 @@
         </p>
       </section>
 
-      <div id="application" hidden>
-        <nav class="local-nav" aria-label="Workspace sections">
-          <button class="nav-button" data-view="research" aria-pressed="true">Research</button>
-          <button class="nav-button secondary-button" data-view="sources" aria-pressed="false">Sources</button>
-          <button class="nav-button secondary-button" data-view="settings" aria-pressed="false">Settings</button>
-        </nav>
+      <div id="application" class="app-shell" hidden>
+        <aside class="workspace-rail">
+          <div class="rail-heading">
+            <h1>Research desk</h1>
+            <p>NYC law and property records, organized for verification.</p>
+          </div>
+          <nav class="local-nav" aria-label="Workspace sections">
+            <button class="nav-button" data-view="research" aria-pressed="true">
+              <span class="nav-title">Research</span>
+              <span class="nav-detail">Search law and HPD records</span>
+            </button>
+            <button class="nav-button secondary-button" data-view="sources" aria-pressed="false">
+              <span class="nav-title">Sources</span>
+              <span class="nav-detail">Corpus status and indexing</span>
+            </button>
+            <button class="nav-button secondary-button" data-view="settings" aria-pressed="false">
+              <span class="nav-title">Settings</span>
+              <span class="nav-detail">Models, spending, and storage</span>
+            </button>
+          </nav>
+          <div class="rail-note">
+            <strong>General legal information</strong>
+            <span>Verify official sources and current law before relying on a result.</span>
+          </div>
+        </aside>
+
+        <div class="workspace-main">
 
         <section id="view-research" class="app-view" aria-labelledby="research-title">
-          <div class="query-band result-shell">
-            <h2 id="research-title">Research installed public sources</h2>
-            <p class="meta-line">
-              Search is local and free. Answer mode may send the question and selected
-              excerpts to your chosen provider and records estimated cost locally.
-            </p>
-            <form id="research-form" class="query-form">
-              <label for="question">Question or search terms</label>
-              <textarea id="question" maxlength="4000" required></textarea>
-              <label for="research-mode">Mode</label>
-              <select id="research-mode">
-                <option value="auto">Choose automatically (free)</option>
-                <option value="search">Search sources only</option>
-                <option value="answer">Answer with citations</option>
-                <option value="property">Property lookup</option>
-              </select>
-              <label for="research-source">Source filter</label>
-              <select id="research-source">
-                <option value="">All installed sources</option>
-              </select>
-              <div class="property-actions">
-                <button type="submit">Run research</button>
-                <button id="answer-cancel" type="button" class="secondary-button" hidden>Cancel answer</button>
-              </div>
-            </form>
-          </div>
-          <div id="research-result" class="empty-state" aria-live="polite">
-            Ask a question to inspect the installed evidence.
-          </div>
-          <div class="result-shell property-panel">
-            <h2>Property violations</h2>
-            <p class="meta-line">
-              Look up bounded pages from NYC HPD by building ID or a structured
-              address. A zero result is not proof that the building does not exist.
-            </p>
-            <form id="property-form" class="query-form property-form">
-              <label for="building-id">HPD building ID</label>
-              <input id="building-id" inputmode="numeric">
-              <label for="registration-id">HPD registration ID</label>
-              <input id="registration-id" inputmode="numeric">
-              <label for="house-number">House number</label>
-              <input id="house-number">
-              <label for="street-name">Street name</label>
-              <input id="street-name">
-              <label for="borough">Borough</label>
-              <select id="borough">
-                <option value="">Select when using an address</option>
-                <option>Manhattan</option><option>Bronx</option>
-                <option>Brooklyn</option><option>Queens</option>
-                <option>Staten Island</option>
-              </select>
-              <label for="zip-code">ZIP code</label>
-              <input id="zip-code" inputmode="numeric" maxlength="5">
-              <label for="violation-class">Violation class</label>
-              <select id="violation-class">
-                <option value="">Any class</option>
-                <option value="A">A</option><option value="B">B</option>
-                <option value="C">C</option><option value="I">I</option>
-              </select>
-              <label for="violation-status">Status</label>
-              <select id="violation-status">
-                <option value="">Any status</option>
-                <option value="open">Open</option>
-                <option value="closed">Closed</option>
-              </select>
-              <label for="inspection-date-from">Inspection date from</label>
-              <input id="inspection-date-from" type="date">
-              <label for="inspection-date-to">Inspection date to</label>
-              <input id="inspection-date-to" type="date">
-              <button type="submit">Look up HPD records</button>
-            </form>
-            <div id="property-result" class="meta-line" aria-live="polite"></div>
-            <div class="property-actions">
-              <button id="property-refresh" type="button" class="secondary-button" hidden>Refresh from HPD</button>
-              <button id="property-next" type="button" class="secondary-button" hidden>Next page</button>
-              <button id="property-summary" type="button" class="secondary-button" hidden>Summarize loaded page</button>
-              <button id="property-export" type="button" class="secondary-button" hidden>Export loaded CSV</button>
-              <button id="property-export-complete" type="button" class="secondary-button" hidden>Export up to 20 pages</button>
-              <button id="property-export-cancel" type="button" class="secondary-button" hidden>Cancel full export</button>
+          <header class="view-header">
+            <div>
+              <h2 id="research-title">Research the record</h2>
+              <p>Search installed public sources or request a provider-backed answer with citations.</p>
             </div>
+            <span class="local-action-badge">Local search is free</span>
+          </header>
+          <div class="research-layout">
+            <div class="research-primary">
+              <div class="query-band result-shell">
+                <form id="research-form" class="query-form">
+                  <div class="form-field question-field">
+                    <label for="question">Question or search terms</label>
+                    <textarea id="question" maxlength="4000" required placeholder="Example: What heat must a landlord provide during winter?"></textarea>
+                  </div>
+                  <div class="research-controls">
+                    <div class="form-field">
+                      <label for="research-mode">Research mode</label>
+                      <select id="research-mode">
+                        <option value="auto">Automatic (free)</option>
+                        <option value="search">Search sources only</option>
+                        <option value="answer">Answer with citations</option>
+                        <option value="property">Property lookup</option>
+                      </select>
+                    </div>
+                    <div class="form-field source-field">
+                      <label for="research-source">Source filter</label>
+                      <select id="research-source">
+                        <option value="">All installed sources</option>
+                      </select>
+                    </div>
+                    <div class="property-actions research-actions">
+                      <button type="submit">Run research</button>
+                      <button id="answer-cancel" type="button" class="secondary-button" hidden>Cancel answer</button>
+                    </div>
+                  </div>
+                  <p class="form-footnote">Answer mode may send the question and selected excerpts to your chosen provider and records estimated cost locally.</p>
+                </form>
+              </div>
+              <div id="research-result" class="empty-state" aria-live="polite">
+                <strong>No evidence loaded</strong>
+                <span>Ask a question to inspect the installed public record.</span>
+              </div>
+            </div>
+            <aside class="result-shell property-panel" aria-labelledby="property-title">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="property-title">Property violations</h2>
+                  <p>Query bounded pages from NYC HPD.</p>
+                </div>
+                <span class="network-badge">Network</span>
+              </div>
+              <form id="property-form" class="query-form property-form">
+                <fieldset>
+                  <legend>Known identifier</legend>
+                  <div class="property-pair">
+                    <div class="form-field">
+                      <label for="building-id">Building ID</label>
+                      <input id="building-id" inputmode="numeric">
+                    </div>
+                    <div class="form-field">
+                      <label for="registration-id">Registration ID</label>
+                      <input id="registration-id" inputmode="numeric">
+                    </div>
+                  </div>
+                </fieldset>
+                <span class="form-divider">or search by address</span>
+                <fieldset>
+                  <legend>Structured address</legend>
+                  <div class="property-address-grid">
+                    <div class="form-field house-field">
+                      <label for="house-number">House no.</label>
+                      <input id="house-number">
+                    </div>
+                    <div class="form-field street-field">
+                      <label for="street-name">Street name</label>
+                      <input id="street-name">
+                    </div>
+                    <div class="form-field borough-field">
+                      <label for="borough">Borough</label>
+                      <select id="borough">
+                        <option value="">Select</option>
+                        <option>Manhattan</option><option>Bronx</option>
+                        <option>Brooklyn</option><option>Queens</option>
+                        <option>Staten Island</option>
+                      </select>
+                    </div>
+                    <div class="form-field zip-field">
+                      <label for="zip-code">ZIP code</label>
+                      <input id="zip-code" inputmode="numeric" maxlength="5">
+                    </div>
+                  </div>
+                </fieldset>
+                <details class="property-filters">
+                  <summary>Optional filters</summary>
+                  <div class="property-filter-grid">
+                    <div class="form-field">
+                      <label for="violation-class">Class</label>
+                      <select id="violation-class">
+                        <option value="">Any class</option>
+                        <option value="A">A</option><option value="B">B</option>
+                        <option value="C">C</option><option value="I">I</option>
+                      </select>
+                    </div>
+                    <div class="form-field">
+                      <label for="violation-status">Status</label>
+                      <select id="violation-status">
+                        <option value="">Any status</option>
+                        <option value="open">Open</option>
+                        <option value="closed">Closed</option>
+                      </select>
+                    </div>
+                    <div class="form-field">
+                      <label for="inspection-date-from">Inspected after</label>
+                      <input id="inspection-date-from" type="date">
+                    </div>
+                    <div class="form-field">
+                      <label for="inspection-date-to">Inspected before</label>
+                      <input id="inspection-date-to" type="date">
+                    </div>
+                  </div>
+                </details>
+                <button type="submit">Look up HPD records</button>
+              </form>
+              <p class="property-caveat">A zero result is not proof that the building does not exist.</p>
+              <div id="property-result" class="meta-line" aria-live="polite"></div>
+              <div class="property-actions">
+                <button id="property-refresh" type="button" class="secondary-button" hidden>Refresh from HPD</button>
+                <button id="property-next" type="button" class="secondary-button" hidden>Next page</button>
+                <button id="property-summary" type="button" class="secondary-button" hidden>Summarize loaded page</button>
+                <button id="property-export" type="button" class="secondary-button" hidden>Export loaded CSV</button>
+                <button id="property-export-complete" type="button" class="secondary-button" hidden>Export up to 20 pages</button>
+                <button id="property-export-cancel" type="button" class="secondary-button" hidden>Cancel full export</button>
+              </div>
+            </aside>
           </div>
         </section>
 
         <section id="view-sources" class="app-view" aria-labelledby="sources-title" hidden>
-          <div id="setup-guidance" class="result-shell" hidden>
+          <header class="view-header">
+            <div>
+              <h2 id="sources-title">Sources and readiness</h2>
+              <p>Manage the official public record available to local search.</p>
+            </div>
+          </header>
+          <div id="setup-guidance" class="result-shell setup-guidance" hidden>
             <h2>Finish first setup</h2>
             <p>
               Your private workspace is ready at <code id="setup-data-path"></code>.
@@ -138,8 +234,7 @@
             </p>
             <button id="setup-settings" type="button" class="secondary-button">Review provider and budget settings</button>
           </div>
-          <div class="result-shell">
-            <h2 id="sources-title">Sources and readiness</h2>
+          <div class="result-shell sources-panel">
             <p id="source-summary" class="meta-line"></p>
             <ul id="source-list" class="citation-list"></ul>
             <div class="property-actions">
@@ -160,7 +255,7 @@
             </div>
             <p id="index-action-status" class="meta-line" aria-live="polite"></p>
           </div>
-          <div class="result-shell">
+          <div class="result-shell jobs-panel">
             <h2>Maintenance jobs</h2>
             <p class="meta-line">
               Closing the browser does not cancel a running job. Interrupted
@@ -170,33 +265,35 @@
           </div>
         </section>
 
-        <section id="view-settings" class="app-view settings-grid" aria-labelledby="settings-title" hidden>
-          <div class="result-shell">
-            <h2 id="settings-title">Models and spending</h2>
+        <section id="view-settings" class="app-view" aria-labelledby="settings-title" hidden>
+          <header class="view-header">
+            <div>
+              <h2 id="settings-title">Workspace controls</h2>
+              <p>Set provider, budget, retention, and local data boundaries.</p>
+            </div>
+          </header>
+          <div class="settings-grid">
+          <div class="result-shell settings-models">
+            <div class="panel-heading">
+              <div>
+                <h2>Models and spending</h2>
+                <p>Hard limits for provider-backed operations.</p>
+              </div>
+              <span class="paid-badge">May charge</span>
+            </div>
             <form id="settings-form" class="query-form">
-              <label for="monthly-budget">Monthly API budget (USD)</label>
-              <input id="monthly-budget" inputmode="decimal" required>
-              <label for="operation-budget">Per-operation API budget (USD)</label>
-              <input id="operation-budget" inputmode="decimal" required>
-              <label for="paid-concurrency">Concurrent paid requests</label>
-              <select id="paid-concurrency">
-                <option value="1">One at a time</option>
-                <option value="2">At most two</option>
-              </select>
-              <label for="answer-deadline">Answer deadline (seconds)</label>
-              <input id="answer-deadline" type="number" min="5" max="300" required>
-              <label for="answer-profile">Answer profile</label>
-              <select id="answer-profile"></select>
-              <label for="embedding-profile">Embedding profile</label>
-              <select id="embedding-profile"></select>
-              <label for="property-cache-max">Property cache limit (MiB)</label>
-              <input id="property-cache-max" type="number" min="10" max="10000" required>
-              <label for="property-cache-retention">Property cache retention (days)</label>
-              <input id="property-cache-retention" type="number" min="1" max="365" required>
-              <label for="operational-retention">Job and log retention (days)</label>
-              <input id="operational-retention" type="number" min="1" max="3650" required>
-              <label for="usage-retention">Completed usage retention (months)</label>
-              <input id="usage-retention" type="number" min="1" max="120" required>
+              <div class="settings-form-grid">
+                <div class="form-field"><label for="monthly-budget">Monthly API budget (USD)</label><input id="monthly-budget" inputmode="decimal" required></div>
+                <div class="form-field"><label for="operation-budget">Per-operation budget (USD)</label><input id="operation-budget" inputmode="decimal" required></div>
+                <div class="form-field"><label for="paid-concurrency">Concurrent paid requests</label><select id="paid-concurrency"><option value="1">One at a time</option><option value="2">At most two</option></select></div>
+                <div class="form-field"><label for="answer-deadline">Answer deadline (seconds)</label><input id="answer-deadline" type="number" min="5" max="300" required></div>
+                <div class="form-field"><label for="answer-profile">Answer profile</label><select id="answer-profile"></select></div>
+                <div class="form-field"><label for="embedding-profile">Embedding profile</label><select id="embedding-profile"></select></div>
+                <div class="form-field"><label for="property-cache-max">Property cache limit (MiB)</label><input id="property-cache-max" type="number" min="10" max="10000" required></div>
+                <div class="form-field"><label for="property-cache-retention">Property cache retention (days)</label><input id="property-cache-retention" type="number" min="1" max="365" required></div>
+                <div class="form-field"><label for="operational-retention">Job and log retention (days)</label><input id="operational-retention" type="number" min="1" max="3650" required></div>
+                <div class="form-field"><label for="usage-retention">Completed usage retention (months)</label><input id="usage-retention" type="number" min="1" max="120" required></div>
+              </div>
               <label class="checkbox-label" for="offline-mode">
                 <input id="offline-mode" type="checkbox">
                 Block application-managed network access after restart
@@ -205,26 +302,23 @@
             </form>
             <p id="settings-status" class="meta-line" aria-live="polite"></p>
           </div>
-          <div class="result-shell">
-            <h2>Provider credential</h2>
+          <div class="result-shell settings-credential">
+            <div class="panel-heading">
+              <div><h2>Provider credential</h2><p>Write-only access for configured model providers.</p></div>
+            </div>
             <p>
               The value is write-only. The explicit file fallback is owner-only;
               install the credentials extra to use an OS keyring.
             </p>
             <form id="credential-form" class="query-form">
-              <label id="provider-key-label" for="provider-key">OpenAI API key</label>
-              <input id="provider-key" type="password" autocomplete="new-password">
-              <label for="credential-storage">Storage</label>
-              <select id="credential-storage">
-                <option value="keyring">OS credential store</option>
-                <option value="file">Owner-only secret file</option>
-              </select>
+              <div class="form-field"><label id="provider-key-label" for="provider-key">OpenAI API key</label><input id="provider-key" type="password" autocomplete="new-password"></div>
+              <div class="form-field"><label for="credential-storage">Storage</label><select id="credential-storage"><option value="keyring">OS credential store</option><option value="file">Owner-only secret file</option></select></div>
               <button type="submit">Replace credential</button>
               <button id="credential-validate" type="button" class="secondary-button">Validate credential (may charge)</button>
             </form>
             <p id="credential-status" class="meta-line" aria-live="polite"></p>
           </div>
-          <div class="result-shell">
+          <div class="result-shell settings-usage">
             <h2>Local usage estimate</h2>
             <dl id="usage-summary"></dl>
             <p class="meta-line">Use of the same key by other applications is not included.</p>
@@ -233,7 +327,7 @@
             <button id="retention-apply" type="button" class="secondary-button">Apply retention cleanup</button>
             <p id="cache-clear-status" class="meta-line" aria-live="polite"></p>
           </div>
-          <div class="result-shell">
+          <div class="result-shell settings-diagnostics">
             <h2>Workspace diagnostics</h2>
             <dl id="workspace-summary"></dl>
             <p class="meta-line">
@@ -243,14 +337,18 @@
             <button id="diagnostics-refresh" type="button" class="secondary-button">Refresh diagnostics</button>
             <p id="diagnostics-status" class="meta-line" aria-live="polite"></p>
           </div>
+          </div>
         </section>
 
-        <section class="result-shell synthetic-panel" aria-labelledby="demo-title">
-          <h2 id="demo-title">Synthetic interface check</h2>
-          <p>This content is generated test data, not NYC law or legal authority.</p>
-          <button id="demo-search" type="button" class="secondary-button">Run synthetic check</button>
-          <p id="demo-result" class="meta-line" aria-live="polite"></p>
-        </section>
+        <details class="synthetic-panel">
+          <summary id="demo-title">Interface test tools</summary>
+          <div class="synthetic-content" aria-labelledby="demo-title">
+            <p>This check uses generated test data, never NYC law or legal authority.</p>
+            <button id="demo-search" type="button" class="secondary-button">Run synthetic check</button>
+            <p id="demo-result" class="meta-line" aria-live="polite"></p>
+          </div>
+        </details>
+        </div>
       </div>
     </main>
     <script src="/static/local.js" defer></script>
