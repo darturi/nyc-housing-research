@@ -9,6 +9,47 @@ let selectedCredentialIsCustom = false;
 let selectedAnswerPricingVerified = true;
 const byId = (id) => document.getElementById(id);
 
+function formatMoney(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "$0.00";
+  return amount.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatDate(value) {
+  if (!value) return "not yet checked";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "date unavailable";
+  return new Intl.DateTimeFormat(undefined, {dateStyle: "medium"}).format(date);
+}
+
+function formatMonth(value) {
+  const [year, month] = String(value).split("-").map(Number);
+  if (!year || !month) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
+function setCredentialOverview(present, provider, detail = null) {
+  const overview = byId("credential-overview");
+  overview.classList.toggle("is-connected", present);
+  overview.classList.toggle("needs-attention", !present);
+  byId("credential-summary").textContent = present
+    ? "API key connected"
+    : "No API key connected";
+  byId("credential-summary-detail").textContent = detail || (present
+    ? `Ready for optional ${provider} features. Test the connection before relying on it.`
+    : "Add a key to use optional answers and improved search.");
+  byId("credential-save").textContent = present ? "Replace key" : "Add key";
+}
+
 async function api(path, options = {}) {
   const request = {...options, headers: {...(options.headers || {})}};
   if (request.method && !["GET", "HEAD"].includes(request.method)) {
@@ -303,7 +344,11 @@ async function exportAnswer(format) {
 
 async function loadSources() {
   const body = await api("/api/v1/sources");
-  byId("source-summary").textContent = `${body.readiness}; ${body.chunk_count} chunks; generation ${body.active_generation_id || "none"}.`;
+  const installedCount = body.sources.filter((source) => source.installed).length;
+  byId("source-summary").textContent = installedCount
+    ? `${installedCount} official ${installedCount === 1 ? "source is" : "sources are"} ready to search.`
+    : "No official sources are installed yet.";
+  byId("source-technical-summary").textContent = `${body.readiness}; ${body.chunk_count} indexed passages; generation ${body.active_generation_id || "none"}.`;
   const list = byId("source-list");
   const filter = byId("research-source");
   list.replaceChildren();
@@ -322,13 +367,13 @@ async function loadSources() {
     const status = document.createElement("span");
     status.className = "citation-source";
     status.textContent = source.installed
-      ? `${source.validation_state}; checked ${source.last_checked_at || "unknown"}`
-      : "not installed";
+      ? `Ready · checked ${formatDate(source.last_checked_at)}`
+      : "Not installed";
     item.append(title, scope, status);
     const update = document.createElement("button");
     update.type = "button";
     update.className = "secondary-button";
-    update.textContent = source.installed ? "Update this module" : "Install this module";
+    update.textContent = source.installed ? "Update source" : "Install source";
     update.addEventListener("click", () => {
       const partial = body.is_partial || !body.active_generation_id;
       if (partial && !window.confirm(
@@ -388,16 +433,33 @@ async function loadJobs() {
     list.append(item);
     return;
   }
+  const jobNames = {
+    corpus_install: "Source installation",
+    corpus_update: "Source update",
+    corpus_verify: "Source check",
+    corpus_rollback: "Source rollback",
+    corpus_index: "Search quality update",
+    property_complete_export: "Property export",
+  };
+  const stateNames = {
+    queued: "Waiting",
+    running: "In progress",
+    paused: "Paused",
+    cancel_requested: "Cancelling",
+    cancelled: "Cancelled",
+    failed: "Needs attention",
+    succeeded: "Complete",
+  };
   body.jobs.forEach((job) => {
     const item = document.createElement("li");
     item.className = "citation-item";
     const title = document.createElement("strong");
-    title.textContent = `${job.job_type.replaceAll("_", " ")} · ${job.state}`;
+    title.textContent = `${jobNames[job.job_type] || job.job_type.replaceAll("_", " ")} · ${stateNames[job.state] || job.state}`;
     const detail = document.createElement("p");
     const progress = job.progress_total === null
       ? String(job.progress_current)
       : `${job.progress_current}/${job.progress_total}`;
-    detail.textContent = `${job.stage}; progress ${progress}; updated ${job.updated_at}.`;
+    detail.textContent = `${job.stage.replaceAll("_", " ")}; progress ${progress}; updated ${formatDate(job.updated_at)}.`;
     item.append(title, detail);
     if (job.error_message) {
       const error = document.createElement("p");
@@ -471,15 +533,15 @@ let lastIndexEstimate = null;
 
 async function estimateSemanticIndex() {
   const target = byId("index-action-status");
-  target.textContent = "Estimating remaining semantic-index work…";
+  target.textContent = "Estimating the remaining work and maximum provider cost…";
   try {
     const estimate = await api("/api/v1/corpus/index-estimate");
     lastIndexEstimate = estimate;
     const cost = `$${estimate.estimated_cost_usd}`;
     const credential = estimate.credential_present
-      ? "credential ready"
-      : "provider credential missing";
-    target.textContent = `${estimate.chunks_requiring_embedding}/${estimate.total_chunks} chunks require embeddings; ${estimate.reusable_chunks} reusable; about ${estimate.estimated_input_tokens} input tokens; estimated ceiling ${cost}; ${credential}.`;
+      ? "Your API key is ready."
+      : "Add an API key in Settings to continue.";
+    target.textContent = `${estimate.chunks_requiring_embedding} of ${estimate.total_chunks} passages need processing; ${estimate.reusable_chunks} can be reused. Estimated maximum cost ${cost}. ${credential}`;
     byId("index-build").disabled = !estimate.credential_present;
     return estimate;
   } catch (error) {
@@ -496,7 +558,7 @@ async function buildSemanticIndex() {
     const estimate = lastIndexEstimate || await estimateSemanticIndex();
     const ceiling = estimate.estimated_cost_usd;
     if (estimate.paid && !window.confirm(
-      `Approve semantic indexing with a hard ceiling of $${ceiling}? Provider charges may apply.`,
+      `Improve search quality with a maximum provider charge of $${ceiling}?`,
     )) return;
     target.textContent = "Starting semantic-index job…";
     const job = await api("/api/v1/corpus/jobs", {
@@ -586,17 +648,26 @@ async function loadSettings() {
   ) || selectedProfiles.find((item) => item && item.provider !== "fake");
   selectedCredentialSlot = credentialProfile?.credential_slot || "openai";
   selectedCredentialIsCustom = credentialProfile?.provider === "openai-compatible";
-  byId("provider-key-label").textContent = `Credential for ${selectedCredentialSlot}`;
+  byId("provider-key-label").textContent = selectedCredentialSlot === "openai"
+    ? "OpenAI API key"
+    : `${selectedCredentialSlot} API key`;
   const selectedCredential = credentials.credentials.find(
     (item) => item.provider === selectedCredentialSlot,
   );
-  byId("credential-status").textContent = selectedCredential?.present
-    ? `Credential ${selectedCredentialSlot} present via ${selectedCredential.source}; not validated in this session.`
-    : `No credential configured for ${selectedCredentialSlot}.`;
+  const credentialPresent = Boolean(selectedCredential?.present);
+  setCredentialOverview(credentialPresent, selectedCredentialSlot);
+  byId("credential-status").textContent = credentialPresent
+    ? "The saved key is write-only and has not been tested in this session."
+    : "";
+  if (selectedCredential?.source === "keyring") {
+    byId("credential-storage").value = "keyring";
+  } else if (selectedCredential?.source === "secret_file") {
+    byId("credential-storage").value = "file";
+  }
   byId("credential-validate").disabled = selectedCredentialIsCustom;
   byId("credential-validate").textContent = selectedCredentialIsCustom
-    ? "Use profiles check in the terminal"
-    : "Validate credential (may charge)";
+    ? "Test custom connection in the terminal"
+    : "Test connection (may charge)";
 }
 
 function populateProfiles(id, profiles, selected) {
@@ -632,7 +703,7 @@ byId("settings-form").addEventListener("submit", async (event) => {
         offline: byId("offline-mode").checked,
       }),
     });
-    byId("settings-status").textContent = "Saved. Restart before starting new model jobs.";
+    byId("settings-status").textContent = "Changes saved. Restart before starting new provider-backed work.";
     await loadUsage();
   } catch (error) {
     byId("settings-status").textContent = error.message;
@@ -689,7 +760,8 @@ byId("credential-form").addEventListener("submit", async (event) => {
       }),
     });
     input.value = "";
-    byId("credential-status").textContent = `Credential ${selectedCredentialSlot} present via ${result.source}; not yet validated.`;
+    setCredentialOverview(true, selectedCredentialSlot);
+    byId("credential-status").textContent = "Key saved securely on this device. Test the connection before relying on it.";
   } catch (error) {
     input.value = "";
     byId("credential-status").textContent = error.message;
@@ -699,7 +771,7 @@ byId("credential-form").addEventListener("submit", async (event) => {
 byId("credential-validate").addEventListener("click", async () => {
   const target = byId("credential-status");
   if (selectedCredentialIsCustom) {
-    target.textContent = "Run profiles check for this custom endpoint in the terminal.";
+    target.textContent = "Test this custom connection with the profiles check in the terminal.";
     return;
   }
   try {
@@ -709,7 +781,7 @@ byId("credential-validate").addEventListener("click", async () => {
     if (!window.confirm(
       `Validate the stored OpenAI credential using ${estimate.model}? Approve a hard ceiling of $${estimate.estimated_cost_usd}.`,
     )) return;
-    target.textContent = "Validating the configured provider capability…";
+    target.textContent = "Testing the connection…";
     const result = await api("/api/v1/credentials/openai/validate", {
       method: "POST",
       body: JSON.stringify({
@@ -717,7 +789,8 @@ byId("credential-validate").addEventListener("click", async () => {
         max_cost_usd: estimate.estimated_cost_usd,
       }),
     });
-    target.textContent = `Credential valid for ${result.model}; recorded cost $${result.cost_usd}.`;
+    setCredentialOverview(true, selectedCredentialSlot, `Connection tested successfully with ${result.model}.`);
+    target.textContent = `Connection successful. This test recorded ${formatMoney(result.cost_usd)} in usage.`;
   } catch (error) {
     target.textContent = error.message;
   }
@@ -962,17 +1035,27 @@ byId("property-export-cancel").addEventListener("click", async () => {
 
 async function loadUsage() {
   const body = await api("/api/v1/usage");
+  const spent = Number(body.settled_usd) || 0;
+  const cap = Number(body.cap_usd) || 0;
+  const remaining = Number(body.remaining_usd) || 0;
+  const usedPercent = cap > 0
+    ? Math.min(100, Math.max(0, ((cap - remaining) / cap) * 100))
+    : 0;
+  byId("usage-primary").textContent = `${formatMoney(spent)} spent of ${formatMoney(cap)}`;
+  byId("usage-secondary").textContent = `${formatMoney(remaining)} remaining · ${formatMonth(body.month)}`;
+  byId("usage-progress").value = usedPercent;
+  byId("usage-progress").textContent = `${Math.round(usedPercent)}%`;
   const target = byId("usage-summary");
   target.replaceChildren();
   const rows = [
     ["Month", body.month],
-    ["Settled", `$${body.settled_usd}`],
-    ["Reserved", `$${body.reserved_usd}`],
-    ["Uncertain", `$${body.uncertain_usd}`],
-    ["Remaining", `$${body.remaining_usd}`],
-    ["Concurrent paid limit", body.max_concurrent_paid_requests],
-    ["Unknown-cost attempts", body.unknown_cost_attempts],
-    ["Unknown-cost unresolved", body.unknown_cost_in_flight + body.unknown_cost_uncertain],
+    ["Confirmed spend", formatMoney(body.settled_usd)],
+    ["Reserved for work in progress", formatMoney(body.reserved_usd)],
+    ["Pending confirmation", formatMoney(body.uncertain_usd)],
+    ["Remaining", formatMoney(body.remaining_usd)],
+    ["Simultaneous paid requests", body.max_concurrent_paid_requests],
+    ["Requests without known pricing", body.unknown_cost_attempts],
+    ["Unresolved requests without known pricing", body.unknown_cost_in_flight + body.unknown_cost_uncertain],
   ];
   if (body.history_pruned_before) {
     rows.push(["History retained since", body.history_pruned_before]);

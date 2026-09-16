@@ -58,11 +58,11 @@
             </button>
             <button class="nav-button secondary-button" data-view="sources" aria-pressed="false">
               <span class="nav-title">Sources</span>
-              <span class="nav-detail">Corpus status and indexing</span>
+              <span class="nav-detail">Manage searchable sources</span>
             </button>
             <button class="nav-button secondary-button" data-view="settings" aria-pressed="false">
               <span class="nav-title">Settings</span>
-              <span class="nav-detail">Models, spending, and storage</span>
+              <span class="nav-detail">API key, usage, and limits</span>
             </button>
           </nav>
           <div class="rail-note">
@@ -122,27 +122,13 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="property-title">Property violations</h2>
-                  <p>Query bounded pages from NYC HPD.</p>
+                  <p>Search current NYC HPD records by address.</p>
                 </div>
                 <span class="network-badge">Network</span>
               </div>
               <form id="property-form" class="query-form property-form">
                 <fieldset>
-                  <legend>Known identifier</legend>
-                  <div class="property-pair">
-                    <div class="form-field">
-                      <label for="building-id">Building ID</label>
-                      <input id="building-id" inputmode="numeric">
-                    </div>
-                    <div class="form-field">
-                      <label for="registration-id">Registration ID</label>
-                      <input id="registration-id" inputmode="numeric">
-                    </div>
-                  </div>
-                </fieldset>
-                <span class="form-divider">or search by address</span>
-                <fieldset>
-                  <legend>Structured address</legend>
+                  <legend>Property address</legend>
                   <div class="property-address-grid">
                     <div class="form-field house-field">
                       <label for="house-number">House no.</label>
@@ -167,6 +153,20 @@
                     </div>
                   </div>
                 </fieldset>
+                <details class="property-filters identifier-search">
+                  <summary>Search by official identifier</summary>
+                  <p class="form-footnote">Use this when you already know the building or HPD registration number.</p>
+                  <div class="property-pair">
+                    <div class="form-field">
+                      <label for="building-id">Building ID</label>
+                      <input id="building-id" inputmode="numeric">
+                    </div>
+                    <div class="form-field">
+                      <label for="registration-id">Registration ID</label>
+                      <input id="registration-id" inputmode="numeric">
+                    </div>
+                  </div>
+                </details>
                 <details class="property-filters">
                   <summary>Optional filters</summary>
                   <div class="property-filter-grid">
@@ -215,8 +215,8 @@
         <section id="view-sources" class="app-view" aria-labelledby="sources-title" hidden>
           <header class="view-header">
             <div>
-              <h2 id="sources-title">Sources and readiness</h2>
-              <p>Manage the official public record available to local search.</p>
+              <h2 id="sources-title">Source library</h2>
+              <p>Choose which official publications are available to search.</p>
             </div>
           </header>
           <div id="setup-guidance" class="result-shell setup-guidance" hidden>
@@ -235,7 +235,13 @@
             <button id="setup-settings" type="button" class="secondary-button">Review provider and budget settings</button>
           </div>
           <div class="result-shell sources-panel">
-            <p id="source-summary" class="meta-line"></p>
+            <div class="source-overview">
+              <p id="source-summary" class="source-summary"></p>
+              <details class="inline-disclosure">
+                <summary>Technical source details</summary>
+                <p id="source-technical-summary" class="meta-line"></p>
+              </details>
+            </div>
             <ul id="source-list" class="citation-list"></ul>
             <div class="property-actions">
               <button id="source-install" type="button">Install core sources</button>
@@ -244,99 +250,150 @@
               <button id="source-rollback" type="button" class="secondary-button">Roll back generation</button>
             </div>
             <p id="source-action-status" class="meta-line" aria-live="polite"></p>
-            <h3>Semantic index</h3>
+            <h3>Improve search quality <span class="optional-label">Optional</span></h3>
             <p class="meta-line">
-              Estimate first. Paid indexing requires a configured credential and
-              approval of the displayed hard cost ceiling.
+              Add meaning-based matching to local search. This uses your API key and
+              may incur a provider charge; you will see and approve a maximum cost first.
             </p>
             <div class="property-actions">
-              <button id="index-estimate" type="button" class="secondary-button">Estimate semantic index</button>
-              <button id="index-build" type="button" disabled>Build semantic index</button>
+              <button id="index-estimate" type="button" class="secondary-button">Estimate cost</button>
+              <button id="index-build" type="button" disabled>Improve search quality</button>
             </div>
             <p id="index-action-status" class="meta-line" aria-live="polite"></p>
           </div>
-          <div class="result-shell jobs-panel">
-            <h2>Maintenance jobs</h2>
-            <p class="meta-line">
-              Closing the browser does not cancel a running job. Interrupted
-              source jobs can be resumed from their last safe local state.
-            </p>
-            <ul id="job-list" class="citation-list"></ul>
-          </div>
+          <details class="result-shell jobs-panel disclosure-card">
+            <summary>
+              <span><strong>Recent activity</strong><small>Updates, checks, and other source work</small></span>
+            </summary>
+            <div class="disclosure-content">
+              <p class="meta-line">
+                Closing the browser does not cancel work in progress. Interrupted
+                source updates can be resumed from their last safe point.
+              </p>
+              <ul id="job-list" class="citation-list"></ul>
+            </div>
+          </details>
         </section>
 
         <section id="view-settings" class="app-view" aria-labelledby="settings-title" hidden>
           <header class="view-header">
             <div>
-              <h2 id="settings-title">Workspace controls</h2>
-              <p>Set provider, budget, retention, and local data boundaries.</p>
+              <h2 id="settings-title">Settings</h2>
+              <p>Connect your API key, review usage, and control spending.</p>
             </div>
           </header>
-          <div class="settings-grid">
-          <div class="result-shell settings-models">
+          <div class="settings-stack">
+          <div class="result-shell settings-primary">
             <div class="panel-heading">
               <div>
-                <h2>Models and spending</h2>
-                <p>Hard limits for provider-backed operations.</p>
+                <h2>API access</h2>
+                <p>Connect a provider for optional answers and improved search.</p>
               </div>
               <span class="paid-badge">May charge</span>
             </div>
-            <form id="settings-form" class="query-form">
-              <div class="settings-form-grid">
-                <div class="form-field"><label for="monthly-budget">Monthly API budget (USD)</label><input id="monthly-budget" inputmode="decimal" required></div>
-                <div class="form-field"><label for="operation-budget">Per-operation budget (USD)</label><input id="operation-budget" inputmode="decimal" required></div>
-                <div class="form-field"><label for="paid-concurrency">Concurrent paid requests</label><select id="paid-concurrency"><option value="1">One at a time</option><option value="2">At most two</option></select></div>
-                <div class="form-field"><label for="answer-deadline">Answer deadline (seconds)</label><input id="answer-deadline" type="number" min="5" max="300" required></div>
-                <div class="form-field"><label for="answer-profile">Answer profile</label><select id="answer-profile"></select></div>
-                <div class="form-field"><label for="embedding-profile">Embedding profile</label><select id="embedding-profile"></select></div>
-                <div class="form-field"><label for="property-cache-max">Property cache limit (MiB)</label><input id="property-cache-max" type="number" min="10" max="10000" required></div>
-                <div class="form-field"><label for="property-cache-retention">Property cache retention (days)</label><input id="property-cache-retention" type="number" min="1" max="365" required></div>
-                <div class="form-field"><label for="operational-retention">Job and log retention (days)</label><input id="operational-retention" type="number" min="1" max="3650" required></div>
-                <div class="form-field"><label for="usage-retention">Completed usage retention (months)</label><input id="usage-retention" type="number" min="1" max="120" required></div>
+            <div class="credential-overview" id="credential-overview">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span><strong id="credential-summary">Checking connection…</strong><small id="credential-summary-detail">Your key is never displayed after it is saved.</small></span>
+            </div>
+            <form id="credential-form" class="query-form credential-form">
+              <div class="credential-entry">
+                <div class="form-field"><label id="provider-key-label" for="provider-key">OpenAI API key</label><input id="provider-key" type="password" autocomplete="new-password"></div>
+                <button id="credential-save" type="submit">Add key</button>
               </div>
-              <label class="checkbox-label" for="offline-mode">
-                <input id="offline-mode" type="checkbox">
-                Block application-managed network access after restart
-              </label>
-              <button type="submit">Save settings</button>
+              <div class="credential-secondary-actions">
+                <button id="credential-validate" type="button" class="secondary-button">Test connection (may charge)</button>
+                <details class="inline-disclosure credential-storage-details">
+                  <summary>How your key is stored</summary>
+                  <p>Your key stays on this device and is write-only after saving. The OS credential store is preferred when available.</p>
+                  <div class="form-field"><label for="credential-storage">Storage method</label><select id="credential-storage"><option value="keyring">OS credential store</option><option value="file">Owner-only secret file</option></select></div>
+                </details>
+              </div>
+            </form>
+            <p id="credential-status" class="meta-line" aria-live="polite"></p>
+
+            <form id="settings-form" class="query-form settings-form">
+              <div class="settings-overview-grid">
+              <section class="settings-section settings-usage" aria-labelledby="usage-title">
+                <div class="settings-section-heading">
+                  <div><h2 id="usage-title">Usage this month</h2><p>Charges recorded by this workspace.</p></div>
+                </div>
+                <div class="usage-overview">
+                  <strong id="usage-primary">Loading usage…</strong>
+                  <span id="usage-secondary"></span>
+                  <progress id="usage-progress" max="100" value="0">0%</progress>
+                </div>
+                <p class="meta-line">Usage of the same key by other applications is not included.</p>
+                <details class="inline-disclosure usage-details">
+                  <summary>View usage details</summary>
+                  <dl id="usage-summary"></dl>
+                </details>
+              </section>
+
+              <section class="settings-section" aria-labelledby="spending-title">
+                <div class="settings-section-heading">
+                  <div><h2 id="spending-title">Spending limits</h2><p>Provider-backed actions stop before exceeding these caps.</p></div>
+                </div>
+                <div class="budget-grid">
+                  <div class="form-field"><label for="monthly-budget">Monthly spending cap (USD)</label><input id="monthly-budget" inputmode="decimal" required></div>
+                  <div class="form-field"><label for="operation-budget">Per-request spending cap (USD)</label><input id="operation-budget" inputmode="decimal" required></div>
+                </div>
+              </section>
+              </div>
+
+              <section class="settings-section privacy-section" aria-labelledby="privacy-title">
+                <div class="settings-section-heading">
+                  <div><h2 id="privacy-title">Privacy and network</h2><p>Local search works without sending a question to a provider.</p></div>
+                </div>
+                <label class="checkbox-label" for="offline-mode">
+                  <input id="offline-mode" type="checkbox">
+                  <span><strong>Work offline after restart</strong><small>Block network access managed by this application.</small></span>
+                </label>
+              </section>
+
+              <details class="settings-disclosure">
+                <summary><span><strong>Advanced provider settings</strong><small>Models, timing, and simultaneous requests</small></span></summary>
+                <div class="disclosure-content settings-form-grid">
+                  <div class="form-field"><label for="answer-profile">Answer model</label><select id="answer-profile"></select></div>
+                  <div class="form-field"><label for="embedding-profile">Embedding profile</label><select id="embedding-profile"></select></div>
+                  <div class="form-field"><label for="paid-concurrency">Simultaneous paid requests</label><select id="paid-concurrency"><option value="1">One at a time</option><option value="2">At most two</option></select></div>
+                  <div class="form-field"><label for="answer-deadline">Stop waiting for an answer after (seconds)</label><input id="answer-deadline" type="number" min="5" max="300" required></div>
+                </div>
+              </details>
+
+              <details class="settings-disclosure">
+                <summary><span><strong>Storage and maintenance</strong><small>Cache limits, history, and cleanup</small></span></summary>
+                <div class="disclosure-content">
+                  <div class="settings-form-grid">
+                    <div class="form-field"><label for="property-cache-max">Property cache limit (MiB)</label><input id="property-cache-max" type="number" min="10" max="10000" required></div>
+                    <div class="form-field"><label for="property-cache-retention">Keep property records for (days)</label><input id="property-cache-retention" type="number" min="1" max="365" required></div>
+                    <div class="form-field"><label for="operational-retention">Keep job and log details for (days)</label><input id="operational-retention" type="number" min="1" max="3650" required></div>
+                    <div class="form-field"><label for="usage-retention">Keep completed usage history for (months)</label><input id="usage-retention" type="number" min="1" max="120" required></div>
+                  </div>
+                  <div class="maintenance-actions">
+                    <button id="property-cache-clear" type="button" class="secondary-button">Clear property cache</button>
+                    <button id="retention-preview" type="button" class="secondary-button">Preview cleanup</button>
+                    <button id="retention-apply" type="button" class="secondary-button">Apply cleanup</button>
+                  </div>
+                  <p id="cache-clear-status" class="meta-line" aria-live="polite"></p>
+                </div>
+              </details>
+
+              <button type="submit">Save changes</button>
             </form>
             <p id="settings-status" class="meta-line" aria-live="polite"></p>
           </div>
-          <div class="result-shell settings-credential">
-            <div class="panel-heading">
-              <div><h2>Provider credential</h2><p>Write-only access for configured model providers.</p></div>
+
+          <details class="result-shell settings-diagnostics disclosure-card">
+            <summary><span><strong>Troubleshooting information</strong><small>Workspace paths, technical status, and version details</small></span></summary>
+            <div class="disclosure-content">
+              <dl id="workspace-summary"></dl>
+              <p class="meta-line">
+                Diagnostics omit questions, addresses, API keys, session tokens, and responses.
+              </p>
+              <button id="diagnostics-refresh" type="button" class="secondary-button">Refresh information</button>
+              <p id="diagnostics-status" class="meta-line" aria-live="polite"></p>
             </div>
-            <p>
-              The value is write-only. The explicit file fallback is owner-only;
-              install the credentials extra to use an OS keyring.
-            </p>
-            <form id="credential-form" class="query-form">
-              <div class="form-field"><label id="provider-key-label" for="provider-key">OpenAI API key</label><input id="provider-key" type="password" autocomplete="new-password"></div>
-              <div class="form-field"><label for="credential-storage">Storage</label><select id="credential-storage"><option value="keyring">OS credential store</option><option value="file">Owner-only secret file</option></select></div>
-              <button type="submit">Replace credential</button>
-              <button id="credential-validate" type="button" class="secondary-button">Validate credential (may charge)</button>
-            </form>
-            <p id="credential-status" class="meta-line" aria-live="polite"></p>
-          </div>
-          <div class="result-shell settings-usage">
-            <h2>Local usage estimate</h2>
-            <dl id="usage-summary"></dl>
-            <p class="meta-line">Use of the same key by other applications is not included.</p>
-            <button id="property-cache-clear" type="button" class="secondary-button">Clear property cache</button>
-            <button id="retention-preview" type="button" class="secondary-button">Preview retention cleanup</button>
-            <button id="retention-apply" type="button" class="secondary-button">Apply retention cleanup</button>
-            <p id="cache-clear-status" class="meta-line" aria-live="polite"></p>
-          </div>
-          <div class="result-shell settings-diagnostics">
-            <h2>Workspace diagnostics</h2>
-            <dl id="workspace-summary"></dl>
-            <p class="meta-line">
-              Transcript history is off in L1. Diagnostics show paths and counts but
-              omit questions, addresses, credentials, session tokens, and responses.
-            </p>
-            <button id="diagnostics-refresh" type="button" class="secondary-button">Refresh diagnostics</button>
-            <p id="diagnostics-status" class="meta-line" aria-live="polite"></p>
-          </div>
+          </details>
           </div>
         </section>
 

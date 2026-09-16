@@ -175,13 +175,14 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             page.locator("#application").wait_for(state="visible")
 
             page.get_by_text("Finish first setup").wait_for()
+            page.get_by_text("Recent activity", exact=True).click()
             source = page.locator("#source-list li").filter(
                 has_text="New York Real Property Actions and Proceedings Law"
             )
             page.once("dialog", lambda dialog: dialog.accept())
-            source.get_by_role("button", name="Install this module").click()
+            source.get_by_role("button", name="Install source").click()
             page.locator("#job-list").get_by_text(
-                "corpus update · succeeded", exact=False
+                "Source update · Complete", exact=False
             ).wait_for()
 
             page.locator('[data-view="research"]').click()
@@ -197,20 +198,22 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
 
             page.locator('[data-view="settings"]').click()
             page.fill("#monthly-budget", "12.25")
+            page.get_by_text("Advanced provider settings", exact=True).click()
             page.select_option("#answer-profile", "openai-answer-luna-v1")
             page.select_option(
                 "#embedding-profile", "openai-embedding-3-small-v1"
             )
             page.locator("#settings-form button[type=submit]").click()
             page.get_by_text(
-                "Saved. Restart before starting new model jobs."
+                "Changes saved. Restart before starting new provider-backed work."
             ).wait_for()
             fixture_credential = "sk-browser-setup-fixture-value"
             page.fill("#provider-key", fixture_credential)
+            page.get_by_text("How your key is stored", exact=True).click()
             page.select_option("#credential-storage", "file")
             page.locator("#credential-form button[type=submit]").click()
             page.get_by_text(
-                "Credential openai present via secret_file", exact=False
+                "Key saved securely on this device.", exact=False
             ).wait_for()
             assert page.locator("#provider-key").input_value() == ""
             assert fixture_credential not in page.content()
@@ -218,7 +221,7 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             page.locator('[data-view="sources"]').click()
             page.get_by_role("button", name="Resume").click()
             page.locator("#job-list").get_by_text(
-                "corpus update · succeeded", exact=False
+                "Source update · Complete", exact=False
             ).wait_for()
 
             page.locator('[data-view="research"]').click()
@@ -243,7 +246,7 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
                 "for building ID 42?",
             )
             page.locator("#research-form button[type=submit]").click()
-            page.locator("#research-result h3").get_by_text(
+            page.locator("#research-result").get_by_text(
                 "Generation", exact=False
             ).wait_for()
             assert "Property mode resolved" not in page.locator(
