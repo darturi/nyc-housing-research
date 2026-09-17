@@ -173,6 +173,36 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
                 wait_until="networkidle",
             )
             page.locator("#application").wait_for(state="visible")
+            markdown = page.evaluate(
+                """() => {
+                    const host = document.createElement("div");
+                    const pane = document.createElement("aside");
+                    const stage = document.createElement("div");
+                    renderMarkdown(
+                        host,
+                        [
+                            "## Summary",
+                            "**Important** and `specific`",
+                            "- First item",
+                        ].join("\\n\\n"),
+                        [],
+                        pane,
+                        stage,
+                    );
+                    return {
+                        heading: host.querySelector("h2")?.textContent,
+                        strong: host.querySelector("strong")?.textContent,
+                        code: host.querySelector("code")?.textContent,
+                        item: host.querySelector("li")?.textContent,
+                    };
+                }"""
+            )
+            assert markdown == {
+                "heading": "Summary",
+                "strong": "Important",
+                "code": "specific",
+                "item": "First item",
+            }
 
             page.get_by_text("Finish first setup").wait_for()
             page.get_by_text("Recent activity", exact=True).click()
@@ -192,9 +222,31 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             page.locator("#research-result").get_by_text(
                 "Synthetic provider output", exact=False
             ).wait_for()
-            page.get_by_role("button", name="Show full excerpt").click()
-            page.get_by_role("button", name="Show less").wait_for()
-            page.get_by_role("link", name="Open official source").wait_for()
+            result = page.locator("#research-result")
+            assert (
+                result.locator(".answer-header h3").text_content()
+                == "Generated answer"
+            )
+            assert result.locator(".answer-sources").get_attribute("open") is None
+            citation_button = page.get_by_role(
+                "button", name="View source 1", exact=False
+            )
+            citation_button.click()
+            source_pane = page.get_by_role("complementary", name="Citation source")
+            source_pane.get_by_text("RPAPL § 711", exact=True).wait_for()
+            source_pane.get_by_role("link", name="Open official source").wait_for()
+            assert citation_button.evaluate(
+                "button => button.closest('p').nextElementSibling === "
+                "document.querySelector('.citation-pane')"
+            )
+            source_pane.get_by_role("button", name="Close source pane").click()
+            sources = result.locator(".answer-sources")
+            sources.locator("summary").click()
+            sources.get_by_role("button", name="Show full excerpt").click()
+            sources.get_by_role("button", name="Show less").wait_for()
+            sources.get_by_role(
+                "link", name="Open official source", exact=True
+            ).wait_for()
 
             page.locator('[data-view="settings"]').click()
             page.fill("#monthly-budget", "12.25")

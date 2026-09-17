@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from decimal import Decimal
@@ -7,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -725,6 +727,40 @@ def create_local_app(
         except JobNotFound:
             return JSONResponse({"error": "Job not found."}, status_code=404)
         return JSONResponse(payload)
+
+    @app.get("/api/v1/jobs/{job_id}/stream")
+    async def stream_answer_job(job_id: str, request: Request):
+        try:
+            job = maintenance_jobs.get(job_id)
+            if job.job_type != "answer":
+                return JSONResponse(
+                    {"error": "Only answer jobs can be streamed."},
+                    status_code=400,
+                )
+            interactive_jobs.get(job_id)
+        except JobNotFound:
+            return JSONResponse({"error": "Job not found."}, status_code=404)
+
+        async def snapshots():
+            previous = None
+            while not await request.is_disconnected():
+                try:
+                    payload = interactive_jobs.get(job_id)
+                except JobNotFound:
+                    break
+                encoded = json.dumps(payload, separators=(",", ":"))
+                if encoded != previous:
+                    yield f"{encoded}\n"
+                    previous = encoded
+                if payload["state"] in {"succeeded", "failed", "cancelled"}:
+                    break
+                await asyncio.sleep(0.075)
+
+        return StreamingResponse(
+            snapshots(),
+            media_type="application/x-ndjson",
+            headers={"X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/v1/jobs/{job_id}/export")
     async def export_answer_job(job_id: str, request: Request) -> JSONResponse:

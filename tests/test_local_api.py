@@ -207,6 +207,16 @@ def test_answer_job_exposes_evidence_and_keeps_question_memory_only(tmp_path) ->
         assert result["provenance"]["retrieval_method"] == "exact+keyword"
         assert result["provenance"]["operation_id"] == job_id
         assert result["result"]["operation_id"] == job_id
+        assert result["partial_answer"] == result["result"]["answer"]
+
+        with client.stream("GET", f"/api/v1/jobs/{job_id}/stream") as stream:
+            assert stream.status_code == 200
+            assert stream.headers["content-type"].startswith(
+                "application/x-ndjson"
+            )
+            snapshots = [line for line in stream.iter_lines() if line]
+        assert len(snapshots) == 1
+        assert '"state":"succeeded"' in snapshots[0]
 
         exported = client.post(
             "/api/v1/exports",

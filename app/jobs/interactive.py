@@ -23,6 +23,7 @@ class InteractiveRecord:
     job_id: str
     stage: str
     evidence: list[dict]
+    partial_answer: str
     result: dict | None
     error: str | None
     expires_at: datetime
@@ -69,6 +70,7 @@ class InteractiveAnswerJobs:
                 job_id=job.id,
                 stage="queued",
                 evidence=[],
+                partial_answer="",
                 result=None,
                 error=None,
                 expires_at=datetime.now(UTC) + self._expiry,
@@ -135,6 +137,7 @@ class InteractiveAnswerJobs:
                     ),
                 },
                 "evidence": evidence,
+                "partial_answer": record.partial_answer if record else "",
                 "result": result,
                 "error": record.error if record else job.error_message,
                 "expires_at": record.expires_at.isoformat() if record else None,
@@ -190,6 +193,12 @@ class InteractiveAnswerJobs:
                     resume={"generation_id": generation_id},
                 )
 
+            def answer_delta(delta: str) -> None:
+                with self._lock:
+                    record = self._records.get(job_id)
+                    if record:
+                        record.partial_answer += delta
+
             result = LocalAnswerService(
                 self._context,
                 self._storage,
@@ -203,6 +212,7 @@ class InteractiveAnswerJobs:
                 cancellation=signal,
                 operation_id=job_id,
                 on_evidence=evidence_ready,
+                on_answer_delta=answer_delta,
                 allow_unknown_cost=allow_unknown_cost,
             )
             with self._lock:

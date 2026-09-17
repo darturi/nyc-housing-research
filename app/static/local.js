@@ -169,7 +169,7 @@ byId("research-form").addEventListener("submit", async (event) => {
       });
       activeAnswerJobId = created.job_id;
       byId("answer-cancel").hidden = false;
-      await pollAnswer(created.job_id, target);
+      await streamAnswer(created.job_id, target);
     }
   } catch (error) {
     target.className = "error-state";
@@ -177,27 +177,63 @@ byId("research-form").addEventListener("submit", async (event) => {
   }
 });
 
-async function pollAnswer(jobId, target) {
+async function streamAnswer(jobId, target) {
   try {
-    for (;;) {
-      const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
-      if (job.evidence.length) {
-        renderEvidence(target, job.evidence, "Evidence retrieved; generating answer…");
+    const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/stream`);
+    if (!response.ok) {
+      const body = await response.json();
+      throw new Error(body.error || `Request failed (${response.status}).`);
+    }
+    if (!response.body) {
+      await pollAnswer(jobId, target);
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let terminal = false;
+    while (!terminal) {
+      const {done, value} = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), {stream: !done});
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        terminal = applyAnswerSnapshot(JSON.parse(line), target);
+        if (terminal) break;
       }
-      if (job.state === "succeeded") {
-        lastAnswerJobId = jobId;
-        renderAnswer(target, job.result);
-        return;
+      if (done) {
+        if (buffer.trim() && !terminal) {
+          terminal = applyAnswerSnapshot(JSON.parse(buffer), target);
+        }
+        if (!terminal) throw new Error("The answer stream ended before completion.");
       }
-      if (["failed", "cancelled"].includes(job.state)) {
-        throw new Error(job.error || "Answer job stopped.");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   } finally {
     if (activeAnswerJobId === jobId) activeAnswerJobId = null;
     byId("answer-cancel").hidden = true;
   }
+}
+
+async function pollAnswer(jobId, target) {
+  for (;;) {
+    const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+    if (applyAnswerSnapshot(job, target)) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+function applyAnswerSnapshot(job, target) {
+  if (job.evidence.length) renderStreamingAnswer(target, job);
+  if (job.state === "succeeded") {
+    lastAnswerJobId = job.job_id;
+    renderAnswer(target, job.result);
+    return true;
+  }
+  if (["failed", "cancelled"].includes(job.state)) {
+    throw new Error(job.error || "Answer job stopped.");
+  }
+  return false;
 }
 
 byId("answer-cancel").addEventListener("click", async () => {
@@ -215,6 +251,7 @@ byId("answer-cancel").addEventListener("click", async () => {
 
 function renderEvidence(target, rows, heading) {
   target.className = "result-shell";
+  delete target.dataset.answerJob;
   target.replaceChildren();
   const header = document.createElement("div");
   header.className = "result-header evidence-header";
@@ -236,11 +273,17 @@ function renderEvidence(target, rows, heading) {
     target.append(empty);
     return;
   }
+  target.append(createCitationList(rows));
+}
+
+function createCitationList(rows) {
   const list = document.createElement("ol");
   list.className = "citation-list";
-  rows.forEach((row) => {
+  rows.forEach((row, index) => {
     const item = document.createElement("li");
     item.className = "citation-item";
+    const sourceNumber = String(row.marker || index + 1).replace(/^\D+/, "");
+    item.dataset.sourceNumber = sourceNumber.padStart(2, "0");
     const label = document.createElement("strong");
     label.textContent = row.citation || row.title || row.source_name;
     const text = document.createElement("p");
@@ -289,25 +332,63 @@ function renderEvidence(target, rows, heading) {
     }
     list.append(item);
   });
-  target.append(list);
+  return list;
+}
+
+function appendAnswerHeader(target, titleText, metaText) {
+  const header = document.createElement("div");
+  header.className = "result-header evidence-header answer-header";
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  const meta = document.createElement("span");
+  meta.className = "evidence-meta";
+  meta.textContent = metaText;
+  header.append(title, meta);
+  target.append(header);
+}
+
+function appendAnswerSources(target, rows) {
+  if (!rows.length) return;
+  const sources = document.createElement("details");
+  sources.className = "answer-sources";
+  const summary = document.createElement("summary");
+  const title = document.createElement("span");
+  title.textContent = "Sources used";
+  const count = document.createElement("span");
+  count.className = "evidence-meta";
+  count.textContent = `${rows.length} passage${rows.length === 1 ? "" : "s"}`;
+  summary.append(title, count);
+  const guidance = document.createElement("p");
+  guidance.className = "answer-sources-guidance";
+  guidance.textContent = "Citation numbers in the answer open the relevant passage in place. This register contains the complete source record.";
+  sources.append(summary, guidance, createCitationList(rows));
+  target.append(sources);
 }
 
 function renderAnswer(target, result) {
-  const heading = `${result.status.replaceAll("_", " ")} · ${result.answer_profile_id}`;
-  renderEvidence(target, result.evidence, heading);
-  const answer = document.createElement("p");
-  answer.className = "answer-text";
-  answer.textContent = result.answer;
-  target.insertBefore(answer, target.children[1] || null);
+  target.className = "result-shell answer-result";
+  delete target.dataset.answerJob;
+  target.replaceChildren();
+  const status = result.status.replaceAll("_", " ");
+  appendAnswerHeader(
+    target,
+    "Generated answer",
+    `${status} · ${result.answer_profile_id} · ${result.evidence.length} cited passage${result.evidence.length === 1 ? "" : "s"}`,
+  );
+  const stage = createAnswerStage(target, result.evidence, false);
+  renderMarkdown(stage.content, result.answer, result.evidence, stage.pane, stage.root);
+  appendAnswerSources(target, result.evidence);
+  const footer = document.createElement("div");
+  footer.className = "answer-footer";
   const disclaimer = document.createElement("p");
   disclaimer.className = "meta-line";
   disclaimer.textContent = result.disclaimer;
-  target.append(disclaimer);
+  footer.append(disclaimer);
   if (!result.cost_known) {
     const costWarning = document.createElement("p");
     costWarning.className = "meta-line";
     costWarning.textContent = "Unknown provider cost; this request was outside USD budget caps.";
-    target.append(costWarning);
+    footer.append(costWarning);
   }
   const actions = document.createElement("div");
   actions.className = "property-actions";
@@ -330,7 +411,261 @@ function renderAnswer(target, result) {
     });
     actions.append(retry);
   }
-  target.append(actions);
+  footer.append(actions);
+  target.append(footer);
+}
+
+function renderStreamingAnswer(target, job) {
+  let content = target.querySelector(".answer-markdown");
+  let pane = target.querySelector(".citation-pane");
+  let stage = target.querySelector(".answer-stage");
+  if (target.dataset.answerJob !== job.job_id || !content || !pane || !stage) {
+    target.className = "result-shell answer-result is-streaming";
+    target.replaceChildren();
+    appendAnswerHeader(
+      target,
+      "Generating answer…",
+      `${job.evidence.length} passage${job.evidence.length === 1 ? "" : "s"} retrieved`,
+    );
+    target.dataset.answerJob = job.job_id;
+    const created = createAnswerStage(target, job.evidence, true);
+    content = created.content;
+    pane = created.pane;
+    stage = created.root;
+    appendAnswerSources(target, job.evidence);
+  }
+  if (job.partial_answer) {
+    content.className = "answer-text answer-markdown markdown-body";
+    renderMarkdown(content, job.partial_answer, job.evidence, pane, stage);
+  } else {
+    content.className = "answer-text answer-markdown answer-pending";
+    content.textContent = "Reviewing the retrieved passages and drafting a cited answer…";
+  }
+}
+
+function createAnswerStage(target, evidence, streaming) {
+  const root = document.createElement("div");
+  root.className = "answer-stage";
+  const article = document.createElement("article");
+  article.className = "answer-panel";
+  const label = document.createElement("div");
+  label.className = "answer-label";
+  const labelText = document.createElement("span");
+  labelText.textContent = streaming ? "Answering" : "Answer";
+  const guidance = document.createElement("span");
+  guidance.className = "answer-citation-guidance";
+  guidance.textContent = "Select a citation number to inspect its source in place";
+  label.append(labelText, guidance);
+  const content = document.createElement("div");
+  content.className = "answer-text answer-markdown markdown-body";
+  content.setAttribute("aria-live", "polite");
+  content.setAttribute("aria-busy", String(streaming));
+  if (streaming) {
+    const indicator = document.createElement("span");
+    indicator.className = "stream-indicator";
+    indicator.textContent = "Streaming";
+    label.append(indicator);
+  }
+  article.append(label, content);
+  const pane = document.createElement("aside");
+  pane.className = "citation-pane";
+  pane.id = "answer-citation-pane";
+  pane.setAttribute("aria-label", "Citation source");
+  pane.hidden = true;
+  root.append(article, pane);
+  target.append(root);
+  return {root, content, pane, evidence};
+}
+
+function renderMarkdown(target, markdown, evidence, pane, stage) {
+  target.replaceChildren();
+  const lines = String(markdown || "").replaceAll("\r\n", "\n").split("\n");
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    if (/^\s*```/.test(line)) {
+      const language = line.trim().slice(3).trim();
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      if (language) code.dataset.language = language;
+      code.textContent = codeLines.join("\n");
+      pre.append(code);
+      target.append(pre);
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const node = document.createElement(`h${heading[1].length}`);
+      appendInlineMarkdown(node, heading[2], evidence, pane, stage);
+      target.append(node);
+      index += 1;
+      continue;
+    }
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      target.append(document.createElement("hr"));
+      index += 1;
+      continue;
+    }
+    if (/^\s*>\s?/.test(line)) {
+      const quoted = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quoted.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      const blockquote = document.createElement("blockquote");
+      renderMarkdown(blockquote, quoted.join("\n"), evidence, pane, stage);
+      target.append(blockquote);
+      continue;
+    }
+    const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      const list = document.createElement(ordered ? "ol" : "ul");
+      const pattern = ordered ? /^\s*\d+[.)]\s+(.+)$/ : /^\s*[-+*]\s+(.+)$/;
+      while (index < lines.length) {
+        const item = lines[index].match(pattern);
+        if (!item) break;
+        const listItem = document.createElement("li");
+        appendInlineMarkdown(listItem, item[1], evidence, pane, stage);
+        list.append(listItem);
+        index += 1;
+      }
+      target.append(list);
+      continue;
+    }
+    const paragraphLines = [line];
+    index += 1;
+    while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines[index])) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    const paragraph = document.createElement("p");
+    appendInlineMarkdown(paragraph, paragraphLines.join("\n"), evidence, pane, stage);
+    target.append(paragraph);
+  }
+}
+
+function isMarkdownBlockStart(line) {
+  return /^\s*(?:```|#{1,6}\s|>|[-+*]\s+|\d+[.)]\s+|(?:-{3,}|\*{3,}|_{3,})\s*$)/.test(line);
+}
+
+function appendInlineMarkdown(target, text, evidence, pane, stage) {
+  const evidenceByMarker = new Map(evidence.map((row) => [row.marker, row]));
+  const token = /(\[(?:E|P)\d+\]|\[[^\]\n]+\]\(https:\/\/[^)\s]+\)|`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\*[^*\n]+\*|_[^_\n]+_|\n)/g;
+  let cursor = 0;
+  for (const match of text.matchAll(token)) {
+    if (match.index > cursor) target.append(document.createTextNode(text.slice(cursor, match.index)));
+    const value = match[0];
+    const citation = value.match(/^\[((?:E|P)\d+)\]$/);
+    const link = value.match(/^\[([^\]\n]+)\]\((https:\/\/[^)\s]+)\)$/);
+    if (citation && evidenceByMarker.has(citation[1])) {
+      const row = evidenceByMarker.get(citation[1]);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "citation-chip";
+      button.textContent = `[${citation[1].slice(1)}]`;
+      button.setAttribute("aria-label", `View source ${citation[1].slice(1)}: ${row.citation || row.title || row.source_name}`);
+      button.setAttribute("aria-controls", pane.id);
+      button.setAttribute("aria-expanded", "false");
+      button.addEventListener("click", () => openCitationPane(pane, stage, row, citation[1], button));
+      target.append(button);
+    } else if (link) {
+      const anchor = document.createElement("a");
+      anchor.href = link[2];
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.textContent = link[1];
+      target.append(anchor);
+    } else if (value === "\n") {
+      target.append(document.createElement("br"));
+    } else if (value.startsWith("`")) {
+      const code = document.createElement("code");
+      code.textContent = value.slice(1, -1);
+      target.append(code);
+    } else {
+      const tag = value.startsWith("**") || value.startsWith("__")
+        ? "strong"
+        : value.startsWith("~~") ? "s" : "em";
+      const trim = tag === "strong" || tag === "s" ? 2 : 1;
+      const node = document.createElement(tag);
+      node.textContent = value.slice(trim, -trim);
+      target.append(node);
+    }
+    cursor = match.index + value.length;
+  }
+  if (cursor < text.length) target.append(document.createTextNode(text.slice(cursor)));
+}
+
+function openCitationPane(pane, stage, row, marker, trigger) {
+  const listItem = trigger.closest("li");
+  const context = listItem || trigger.closest("p, blockquote, h1, h2, h3, h4, h5, h6, pre")
+    || trigger.closest(".answer-markdown");
+  stage.querySelectorAll(".is-citation-active").forEach((node) => {
+    node.classList.remove("is-citation-active");
+  });
+  if (context) context.classList.add("is-citation-active");
+  pane.replaceChildren();
+  pane.hidden = false;
+  stage.classList.add("has-open-citation");
+  stage.querySelectorAll(".citation-chip").forEach((button) => {
+    button.setAttribute("aria-expanded", String(button === trigger));
+  });
+  const header = document.createElement("div");
+  header.className = "citation-pane-header";
+  const eyebrow = document.createElement("span");
+  eyebrow.textContent = `Source ${marker.slice(1)}`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "citation-pane-close";
+  close.setAttribute("aria-label", "Close source pane");
+  close.textContent = "×";
+  close.addEventListener("click", () => {
+    pane.hidden = true;
+    stage.classList.remove("has-open-citation");
+    if (context) context.classList.remove("is-citation-active");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.focus();
+  });
+  header.append(eyebrow, close);
+  const title = document.createElement("h4");
+  title.textContent = row.citation || row.title || row.source_name;
+  const excerpt = document.createElement("p");
+  excerpt.className = "citation-pane-excerpt";
+  excerpt.textContent = row.excerpt || row.text || "No excerpt is available.";
+  const metadata = document.createElement("p");
+  metadata.className = "citation-source";
+  metadata.textContent = [row.source_name, row.publisher, row.retrieved_at ? `retrieved ${row.retrieved_at}` : null].filter(Boolean).join(" · ");
+  pane.append(header, title, excerpt, metadata);
+  if (row.source_url) {
+    try {
+      const url = new URL(row.source_url);
+      if (url.protocol === "https:") {
+        const link = document.createElement("a");
+        link.href = url.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open official source ↗";
+        pane.append(link);
+      }
+    } catch (_) {
+      // Invalid publisher metadata is shown without creating a link.
+    }
+  }
+  if (context?.tagName === "LI") {
+    context.append(pane);
+  } else if (context) {
+    context.insertAdjacentElement("afterend", pane);
+  }
 }
 
 async function exportAnswer(format) {

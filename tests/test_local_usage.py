@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -144,6 +145,60 @@ def test_gateway_settles_openai_response_and_sends_store_false(tmp_path) -> None
         )
         assert result.text == "Grounded answer [1]."
         assert b'"store":false' in captured["body"]
+        with storage.state_engine.connect() as connection:
+            assert (
+                connection.scalar(select(func.count()).select_from(usage_events)) == 2
+            )
+    finally:
+        gateway.close()
+        client.close()
+        storage.close()
+
+
+def test_gateway_streams_openai_text_deltas_and_settles_final_usage(tmp_path) -> None:
+    context, storage = _workspace(tmp_path)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.read())
+        events = [
+            {
+                "type": "response.output_text.delta",
+                "delta": "Grounded answer ",
+            },
+            {"type": "response.output_text.delta", "delta": "[E1]."},
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output_text": "Grounded answer [E1].",
+                    "usage": {"input_tokens": 100, "output_tokens": 25},
+                },
+            },
+        ]
+        content = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            content=content,
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    gateway = ProviderGateway(context, UsageLedger(storage), client=client)
+    deltas = []
+    try:
+        result = gateway.answer(
+            prompt="Question and evidence",
+            profile=get_profile("openai-answer-luna-v1"),
+            credential="sk-fixture-not-a-real-key",
+            on_text_delta=deltas.append,
+        )
+        assert deltas == ["Grounded answer ", "[E1]."]
+        assert result.text == "Grounded answer [E1]."
+        assert captured["payload"]["stream"] is True
+        assert captured["payload"]["stream_options"] == {
+            "include_obfuscation": False
+        }
         with storage.state_engine.connect() as connection:
             assert (
                 connection.scalar(select(func.count()).select_from(usage_events)) == 2

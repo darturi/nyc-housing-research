@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -64,6 +66,7 @@ class ProviderGateway:
         deadline: Deadline | None = None,
         cancellation: CancellationSignal | None = None,
         allow_unknown_cost: bool = False,
+        on_text_delta: Callable[[str], None] | None = None,
     ) -> ProviderAnswer:
         if profile.kind != ProfileKind.ANSWER:
             raise ProviderExecutionError("Selected profile is not an answer profile.")
@@ -102,6 +105,8 @@ class ProviderGateway:
                 "Synthetic provider output for interface testing only; this is not "
                 f"a substantive legal answer {marker}."
             )
+            if on_text_delta:
+                on_text_delta(text)
             actual_output = _estimate_tokens(text)
             actual = _cost(profile, input_tokens, actual_output)
             self._settle(
@@ -122,39 +127,46 @@ class ProviderGateway:
                 actual is not None,
             )
         assert profile.endpoint is not None
+        request_payload = {
+            "model": profile.model,
+            "input": prompt,
+            "max_output_tokens": profile.max_output_tokens,
+            "store": False,
+        }
+        stream_response = on_text_delta is not None and profile.provider == "openai"
+        if stream_response:
+            request_payload["stream"] = True
+            request_payload["stream_options"] = {"include_obfuscation": False}
         try:
-            response = self._client.post(
-                profile.endpoint,
-                headers={"Authorization": f"Bearer {credential}"},
-                json={
-                    "model": profile.model,
-                    "input": prompt,
-                    "max_output_tokens": profile.max_output_tokens,
-                    "store": False,
-                },
-                timeout=_timeout(deadline, profile),
+            payload = (
+                self._streaming_answer_payload(
+                    profile.endpoint,
+                    credential,
+                    request_payload,
+                    deadline,
+                    cancellation,
+                    reservation,
+                    profile,
+                    snapshot,
+                    on_text_delta,
+                )
+                if stream_response and on_text_delta
+                else self._answer_payload(
+                    profile.endpoint,
+                    credential,
+                    request_payload,
+                    deadline,
+                    cancellation,
+                    reservation,
+                    profile,
+                    snapshot,
+                )
             )
-        except httpx.HTTPError as exc:
-            self._uncertain(reservation, profile, snapshot)
-            raise ProviderExecutionError(
-                "The answer provider did not return a usable response."
-            ) from exc
-        _check(deadline, cancellation, reservation, self, profile, snapshot)
-        if response.status_code >= 500:
-            self._uncertain(reservation, profile, snapshot)
-            raise ProviderExecutionError(
-                "The answer provider failed after request submission."
-            )
-        if response.status_code >= 400:
-            self._settle(reservation, profile, Decimal("0"), 0, 0, snapshot)
-            raise ProviderExecutionError(
-                f"The answer provider rejected the request ({response.status_code})."
-            )
-        try:
-            payload = response.json()
             if payload.get("status") == "incomplete":
                 raise ValueError("incomplete provider response")
             text = _response_text(payload)
+            if on_text_delta and not stream_response:
+                on_text_delta(text)
             usage = payload.get("usage") or {}
             actual_input = int(usage.get("input_tokens", input_tokens))
             actual_output = int(usage.get("output_tokens", _estimate_tokens(text)))
@@ -181,6 +193,119 @@ class ProviderGateway:
             actual,
             actual is not None,
         )
+
+    def _answer_payload(
+        self,
+        endpoint: str,
+        credential: str,
+        request_payload: dict[str, object],
+        deadline: Deadline | None,
+        cancellation: CancellationSignal | None,
+        reservation: UsageReservation,
+        profile: ProviderProfile,
+        snapshot: dict[str, object],
+    ) -> dict:
+        try:
+            response = self._client.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {credential}"},
+                json=request_payload,
+                timeout=_timeout(deadline, profile),
+            )
+        except httpx.HTTPError as exc:
+            self._uncertain(reservation, profile, snapshot)
+            raise ProviderExecutionError(
+                "The answer provider did not return a usable response."
+            ) from exc
+        _check(deadline, cancellation, reservation, self, profile, snapshot)
+        if response.status_code >= 500:
+            self._uncertain(reservation, profile, snapshot)
+            raise ProviderExecutionError(
+                "The answer provider failed after request submission."
+            )
+        if response.status_code >= 400:
+            self._settle(reservation, profile, Decimal("0"), 0, 0, snapshot)
+            raise ProviderExecutionError(
+                f"The answer provider rejected the request ({response.status_code})."
+            )
+        return response.json()
+
+    def _streaming_answer_payload(
+        self,
+        endpoint: str,
+        credential: str,
+        request_payload: dict[str, object],
+        deadline: Deadline | None,
+        cancellation: CancellationSignal | None,
+        reservation: UsageReservation,
+        profile: ProviderProfile,
+        snapshot: dict[str, object],
+        on_text_delta: Callable[[str], None],
+    ) -> dict:
+        completed: dict | None = None
+        try:
+            with self._client.stream(
+                "POST",
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {credential}",
+                    "Accept": "text/event-stream",
+                },
+                json=request_payload,
+                timeout=_timeout(deadline, profile),
+            ) as response:
+                if response.status_code >= 500:
+                    self._uncertain(reservation, profile, snapshot)
+                    raise ProviderExecutionError(
+                        "The answer provider failed after request submission."
+                    )
+                if response.status_code >= 400:
+                    self._settle(
+                        reservation, profile, Decimal("0"), 0, 0, snapshot
+                    )
+                    raise ProviderExecutionError(
+                        "The answer provider rejected the request "
+                        f"({response.status_code})."
+                    )
+                for line in response.iter_lines():
+                    _check(
+                        deadline,
+                        cancellation,
+                        reservation,
+                        self,
+                        profile,
+                        snapshot,
+                    )
+                    if not line.startswith("data:"):
+                        continue
+                    encoded = line[5:].strip()
+                    if not encoded or encoded == "[DONE]":
+                        continue
+                    event = json.loads(encoded)
+                    event_type = event.get("type")
+                    if event_type == "response.output_text.delta":
+                        delta = event.get("delta")
+                        if not isinstance(delta, str):
+                            raise ValueError("invalid text delta")
+                        if delta:
+                            on_text_delta(delta)
+                    elif event_type in {
+                        "response.completed",
+                        "response.failed",
+                        "response.incomplete",
+                    }:
+                        response_payload = event.get("response")
+                        if not isinstance(response_payload, dict):
+                            raise ValueError("missing final response")
+                        completed = response_payload
+        except httpx.HTTPError as exc:
+            self._uncertain(reservation, profile, snapshot)
+            raise ProviderExecutionError(
+                "The answer provider did not return a usable response."
+            ) from exc
+        if completed is None:
+            raise ValueError("missing response.completed event")
+        return completed
 
     def embeddings(
         self,

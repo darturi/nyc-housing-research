@@ -104,6 +104,7 @@ class LocalAnswerService:
         operation_id: str | None = None,
         on_evidence: Callable[[tuple[LocalAnswerEvidence, ...], str], None]
         | None = None,
+        on_answer_delta: Callable[[str], None] | None = None,
         allow_unknown_cost: bool = False,
     ) -> LocalAnswerResult:
         question = " ".join(question.split())
@@ -216,6 +217,7 @@ class LocalAnswerService:
                 deadline=deadline,
                 cancellation=cancellation,
                 allow_unknown_cost=allow_unknown_cost,
+                on_text_delta=on_answer_delta,
             )
         except (
             CredentialStoreError,

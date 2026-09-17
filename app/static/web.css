@@ -982,13 +982,304 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.local-app #research-result .answer-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border-bottom: 1px solid var(--local-line);
+  background: #fff;
+}
+
+.local-app #research-result .answer-stage.has-open-citation {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.local-app #research-result .answer-panel {
+  min-width: 0;
+}
+
+.local-app #research-result .answer-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px 0;
+  color: var(--local-muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.local-app #research-result .answer-citation-guidance {
+  margin-left: auto;
+  color: var(--local-muted);
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-align: right;
+  text-transform: none;
+}
+
+.local-app #research-result .stream-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--local-blue);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.local-app #research-result .stream-indicator::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--local-blue);
+  content: "";
+  animation: stream-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes stream-pulse {
+  from { opacity: 0.35; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .local-app #research-result .answer-text {
   max-width: 74ch;
   margin: 0;
   padding: 22px 20px;
-  border-bottom: 1px solid var(--local-line);
   font-size: 1rem;
   line-height: 1.65;
+}
+
+.local-app #research-result .answer-pending {
+  color: var(--local-muted);
+  font-style: italic;
+}
+
+.local-app #research-result .markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.local-app #research-result .markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.local-app #research-result .markdown-body h1,
+.local-app #research-result .markdown-body h2,
+.local-app #research-result .markdown-body h3,
+.local-app #research-result .markdown-body h4,
+.local-app #research-result .markdown-body h5,
+.local-app #research-result .markdown-body h6 {
+  margin: 1.4em 0 0.55em;
+  color: var(--local-ink-strong);
+  font-size: 1.08rem;
+  line-height: 1.3;
+}
+
+.local-app #research-result .markdown-body p,
+.local-app #research-result .markdown-body ul,
+.local-app #research-result .markdown-body ol,
+.local-app #research-result .markdown-body blockquote,
+.local-app #research-result .markdown-body pre {
+  margin: 0 0 1em;
+}
+
+.local-app #research-result .markdown-body ul,
+.local-app #research-result .markdown-body ol {
+  padding-left: 1.35em;
+}
+
+.local-app #research-result .markdown-body li + li {
+  margin-top: 0.35em;
+}
+
+.local-app #research-result .markdown-body blockquote {
+  padding: 2px 0 2px 16px;
+  border-left: 3px solid var(--local-blue);
+  color: var(--local-muted);
+}
+
+.local-app #research-result .markdown-body pre {
+  overflow-x: auto;
+  padding: 14px;
+  border: 1px solid var(--local-line);
+  border-radius: 6px;
+  background: var(--local-layer);
+  font-size: 0.82rem;
+}
+
+.local-app #research-result .markdown-body code {
+  padding: 0.12em 0.32em;
+  border-radius: 4px;
+  background: var(--local-layer);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.local-app #research-result .markdown-body pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.local-app #research-result .markdown-body a {
+  color: var(--local-blue-dark);
+  font-weight: 750;
+  text-underline-offset: 3px;
+}
+
+.local-app #research-result .citation-chip {
+  min-width: 25px;
+  min-height: 22px;
+  margin: 0 2px;
+  padding: 0 6px;
+  border: 1px solid #aebdf2;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: var(--local-blue-dark);
+  font-size: 0.72em;
+  font-weight: 900;
+  line-height: 20px;
+  vertical-align: 0.16em;
+}
+
+.local-app #research-result .citation-chip:hover,
+.local-app #research-result .citation-chip:focus-visible {
+  border-color: var(--local-blue);
+  background: var(--local-blue);
+  color: #fff;
+}
+
+.local-app #research-result .citation-chip[aria-expanded="true"] {
+  border-color: var(--local-blue);
+  background: var(--local-blue);
+  color: #fff;
+}
+
+.local-app #research-result .is-citation-active:not(.answer-markdown) {
+  margin-left: -10px;
+  padding-left: 10px;
+  box-shadow: inset 3px 0 0 var(--local-blue);
+}
+
+.local-app #research-result .citation-pane {
+  min-width: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 4px 0 22px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--local-line);
+  border-left: 4px solid var(--local-blue);
+  background: var(--local-layer);
+}
+
+.local-app #research-result .citation-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  color: var(--local-blue-dark);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.local-app #research-result .citation-pane-close {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--local-line-strong);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--local-ink);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.local-app #research-result .citation-pane h4 {
+  margin: 0 0 10px;
+  color: var(--local-ink-strong);
+  font-size: 0.94rem;
+}
+
+.local-app #research-result .citation-pane-excerpt {
+  margin: 0 0 14px;
+  color: #263646;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.local-app #research-result .citation-pane > a {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--local-blue-dark);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-underline-offset: 3px;
+}
+
+.local-app #research-result .answer-footer {
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--local-line);
+  background: var(--local-layer);
+}
+
+.local-app #research-result .answer-footer .meta-line {
+  margin: 0 0 8px;
+}
+
+.local-app #research-result .answer-sources {
+  border-bottom: 1px solid var(--local-line);
+  background: #fff;
+}
+
+.local-app #research-result .answer-sources > summary {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  color: var(--local-ink);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 850;
+  list-style: none;
+}
+
+.local-app #research-result .answer-sources > summary::-webkit-details-marker {
+  display: none;
+}
+
+.local-app #research-result .answer-sources > summary::before {
+  color: var(--local-blue);
+  content: "+";
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.local-app #research-result .answer-sources[open] > summary::before {
+  content: "−";
+}
+
+.local-app #research-result .answer-sources > summary > :first-child {
+  margin-right: auto;
+}
+
+.local-app #research-result .answer-sources-guidance {
+  margin: 0;
+  padding: 13px 20px;
+  border-top: 1px solid var(--local-line);
+  border-bottom: 1px solid var(--local-line);
+  background: var(--local-layer);
+  color: var(--local-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.local-app #research-result .answer-sources + .answer-footer {
+  border-top: 0;
 }
 
 .local-app #research-result .citation-list {
@@ -1016,7 +1307,7 @@ dd {
   top: 20px;
   left: 20px;
   color: var(--local-blue);
-  content: counter(evidence, decimal-leading-zero);
+  content: attr(data-source-number);
   font-size: 0.72rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -1788,6 +2079,15 @@ dd {
     flex-direction: column;
     gap: 4px;
   }
+
+  .local-app #research-result .answer-stage.has-open-citation {
+    grid-template-columns: 1fr;
+  }
+
+  .local-app #research-result .citation-pane {
+    max-height: 440px;
+    border-left: 4px solid var(--local-blue);
+  }
 }
 
 @media (max-width: 440px) {
@@ -1803,6 +2103,10 @@ dd {
   .local-app .route-badge {
     padding: 0 7px;
     font-size: 0.63rem;
+  }
+
+  .local-app #research-result .answer-citation-guidance {
+    display: none;
   }
 
   .local-app .query-band,
