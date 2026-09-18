@@ -1867,6 +1867,315 @@ dd {
   margin-top: 4px;
 }
 
+.local-app .guide-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);
+  align-items: start;
+  gap: 22px;
+}
+
+.local-app .guide-main,
+.local-app .guide-aside {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.local-app .guide-intro,
+.local-app .guide-modes,
+.local-app .guide-reading,
+.local-app .boundary-panel {
+  padding: 24px;
+}
+
+.local-app .guide-intro {
+  border-top: 4px solid var(--local-blue);
+}
+
+.local-app .guide-kicker {
+  margin: 0 0 7px;
+  color: var(--local-blue-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.local-app .guide-intro h2 {
+  max-width: 24ch;
+  margin: 0 0 12px;
+  color: var(--local-ink-strong);
+  font-size: clamp(1.35rem, 2vw, 1.72rem);
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+}
+
+.local-app .guide-lead {
+  max-width: 73ch;
+  margin: 0;
+  color: var(--local-muted);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.local-app .guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.local-app .guide-section {
+  padding: 24px 0 4px;
+  border-top: 1px solid var(--local-line-strong);
+}
+
+.local-app .guide-section-heading {
+  margin-bottom: 18px;
+}
+
+.local-app .guide-section-heading h2,
+.local-app .boundary-panel h2,
+.local-app .guide-question-panel h2,
+.local-app .guide-caution h2 {
+  margin: 0;
+  color: var(--local-ink-strong);
+  font-size: 1.16rem;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.local-app .guide-section-heading > p:last-child {
+  margin: 5px 0 0;
+  color: var(--local-muted);
+  font-size: 0.82rem;
+}
+
+.local-app .guide-steps {
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--local-line);
+  list-style: none;
+}
+
+.local-app .guide-steps li {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 14px;
+  padding: 19px 0;
+  border-top: 1px solid var(--local-line);
+}
+
+.local-app .guide-step-number {
+  color: var(--local-blue);
+  font-size: 0.76rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.local-app .guide-steps h3,
+.local-app .mode-row h3 {
+  margin: 0;
+  color: var(--local-ink);
+  font-size: 0.93rem;
+  line-height: 1.3;
+}
+
+.local-app .guide-steps p {
+  max-width: 70ch;
+  margin: 5px 0 0;
+  color: var(--local-muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.local-app .guide-text-action,
+.local-app .guide-text-action:hover {
+  min-height: auto;
+  margin-top: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--local-blue-dark);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.local-app .guide-text-action:hover {
+  color: var(--local-blue);
+}
+
+.local-app .guide-modes {
+  border-top: 4px solid var(--local-ink);
+}
+
+.local-app .mode-ledger {
+  border-top: 1px solid var(--local-line);
+}
+
+.local-app .mode-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.65fr) minmax(210px, 1.35fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--local-line);
+}
+
+.local-app .mode-row > div {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.local-app .mode-index {
+  display: inline-grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid var(--local-line-strong);
+  color: var(--local-blue-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.local-app .mode-row > p {
+  margin: 0;
+  color: var(--local-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.local-app .mode-row > .local-action-badge,
+.local-app .mode-row > .network-badge,
+.local-app .mode-row > .paid-badge {
+  justify-self: end;
+  font-size: 0.62rem;
+}
+
+.local-app .guide-reading {
+  background: var(--local-layer);
+}
+
+.local-app .reading-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--local-line-strong);
+  list-style: none;
+  counter-reset: reading-check;
+}
+
+.local-app .reading-checks li {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding: 17px 16px 0;
+  border-left: 1px solid var(--local-line-strong);
+  counter-increment: reading-check;
+}
+
+.local-app .reading-checks li:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.local-app .reading-checks strong {
+  color: var(--local-ink);
+  font-size: 0.82rem;
+}
+
+.local-app .reading-checks strong::before {
+  margin-right: 7px;
+  color: var(--local-blue);
+  content: "0" counter(reading-check);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.local-app .reading-checks span {
+  color: var(--local-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.local-app .boundary-panel {
+  border-top: 4px solid var(--local-yellow);
+}
+
+.local-app .boundary-list,
+.local-app .question-examples {
+  margin: 17px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-app .boundary-list li {
+  padding: 15px 0;
+  border-top: 1px solid var(--local-line);
+}
+
+.local-app .boundary-list p {
+  margin: 8px 0 0;
+  color: var(--local-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.local-app .boundary-settings {
+  width: 100%;
+  margin-top: 3px;
+  font-size: 0.76rem;
+}
+
+.local-app .guide-question-panel {
+  padding: 22px 24px 24px;
+  border: 1px solid var(--local-line);
+  background: var(--local-sheet);
+}
+
+.local-app .question-examples li {
+  position: relative;
+  padding: 12px 0 12px 22px;
+  border-top: 1px solid var(--local-line);
+  color: var(--local-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.local-app .question-examples li::before {
+  position: absolute;
+  top: 13px;
+  left: 0;
+  color: var(--local-blue);
+  content: "?";
+  font-weight: 900;
+}
+
+.local-app .guide-caution {
+  padding: 19px 20px;
+  border-left: 4px solid var(--local-orange);
+  background: #fff2ed;
+}
+
+.local-app .guide-caution h2 {
+  color: #7e2b12;
+  font-size: 0.9rem;
+}
+
+.local-app .guide-caution p {
+  margin: 7px 0 0;
+  color: #6f3928;
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
 .local-app .synthetic-panel {
   margin-top: 24px;
   border-top: 1px solid var(--local-line);
@@ -1984,6 +2293,18 @@ dd {
     padding-top: 30px;
   }
 
+  .local-app .guide-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .local-app .guide-aside {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .local-app .guide-caution {
+    grid-column: 1 / -1;
+  }
+
 }
 
 @media (max-width: 700px) {
@@ -2035,8 +2356,36 @@ dd {
   .local-app .credential-entry,
   .local-app .settings-overview-grid,
   .local-app .settings-form-grid,
-  .local-app .property-address-grid {
+  .local-app .property-address-grid,
+  .local-app .mode-row,
+  .local-app .reading-checks,
+  .local-app .guide-aside {
     grid-template-columns: 1fr;
+  }
+
+  .local-app .mode-row {
+    gap: 9px;
+  }
+
+  .local-app .mode-row > .local-action-badge,
+  .local-app .mode-row > .network-badge,
+  .local-app .mode-row > .paid-badge {
+    justify-self: start;
+  }
+
+  .local-app .reading-checks li,
+  .local-app .reading-checks li:first-child {
+    padding: 14px 0;
+    border-left: 0;
+    border-bottom: 1px solid var(--local-line-strong);
+  }
+
+  .local-app .reading-checks li:last-child {
+    border-bottom: 0;
+  }
+
+  .local-app .guide-caution {
+    grid-column: auto;
   }
 
   .local-app .credential-entry button,
@@ -2118,8 +2467,18 @@ dd {
   .local-app .property-panel,
   .local-app .settings-stack > .result-shell,
   .local-app .sources-panel,
-  .local-app .setup-guidance {
+  .local-app .setup-guidance,
+  .local-app .guide-intro,
+  .local-app .guide-modes,
+  .local-app .guide-reading,
+  .local-app .boundary-panel,
+  .local-app .guide-question-panel {
     padding: 18px;
+  }
+
+  .local-app .guide-actions,
+  .local-app .guide-actions button {
+    width: 100%;
   }
 
   .local-app .disclosure-card > summary {

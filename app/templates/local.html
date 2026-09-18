@@ -64,6 +64,10 @@
               <span class="nav-title">Settings</span>
               <span class="nav-detail">API key, usage, and limits</span>
             </button>
+            <button class="nav-button secondary-button" data-view="guide" aria-pressed="false">
+              <span class="nav-title">Guide</span>
+              <span class="nav-detail">Purpose, workflow, and limits</span>
+            </button>
           </nav>
           <div class="rail-note">
             <strong>General legal information</strong>
@@ -393,6 +397,152 @@
               <p id="diagnostics-status" class="meta-line" aria-live="polite"></p>
             </div>
           </details>
+          </div>
+        </section>
+
+        <section id="view-guide" class="app-view" aria-labelledby="guide-title" hidden>
+          <header class="view-header">
+            <div>
+              <h2 id="guide-title">How to use this desk</h2>
+              <p>A practical guide to finding evidence, checking property records, and knowing when information leaves this machine.</p>
+            </div>
+            <span class="local-action-badge">Local-first guide</span>
+          </header>
+
+          <div class="guide-layout">
+            <div class="guide-main">
+              <section class="result-shell guide-intro" aria-labelledby="guide-purpose-title">
+                <p class="guide-kicker">Purpose</p>
+                <h2 id="guide-purpose-title">Evidence-backed NYC housing research, in one private workspace.</h2>
+                <p class="guide-lead">
+                  Use this site to search installed housing-law sources, inspect the
+                  passages behind a result, and look up bounded NYC HPD violation
+                  records. It is designed for research you can verify—not for replacing
+                  an attorney or treating a generated answer as legal authority.
+                </p>
+                <div class="guide-actions">
+                  <button type="button" data-guide-target="research">Start researching</button>
+                  <button type="button" class="secondary-button" data-guide-target="sources">Prepare sources</button>
+                </div>
+              </section>
+
+              <section class="guide-section" aria-labelledby="guide-workflow-title">
+                <div class="guide-section-heading">
+                  <p class="guide-kicker">Recommended workflow</p>
+                  <h2 id="guide-workflow-title">From question to verified source</h2>
+                  <p>Each step keeps the evidence and its boundaries visible.</p>
+                </div>
+                <ol class="guide-steps">
+                  <li>
+                    <span class="guide-step-number" aria-hidden="true">01</span>
+                    <div>
+                      <h3>Prepare the source library</h3>
+                      <p>Install the core publications once, then update them periodically. Source search is free and local after installation.</p>
+                      <button type="button" class="guide-text-action" data-guide-target="sources">Open Sources <span aria-hidden="true">&#8594;</span></button>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="guide-step-number" aria-hidden="true">02</span>
+                    <div>
+                      <h3>Ask one specific question</h3>
+                      <p>Use a citation, legal topic, or plain-language question. For a building, enter its address and confirm the intended HPD record.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="guide-step-number" aria-hidden="true">03</span>
+                    <div>
+                      <h3>Choose the right research mode</h3>
+                      <p>Search locally for source text, use a provider only when you want a generated explanation, or choose property lookup for HPD records.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="guide-step-number" aria-hidden="true">04</span>
+                    <div>
+                      <h3>Read past the answer</h3>
+                      <p>Inspect cited excerpts, open the official publication, and check that the law is current before relying on a result.</p>
+                    </div>
+                  </li>
+                </ol>
+              </section>
+
+              <section class="result-shell guide-modes" aria-labelledby="guide-modes-title">
+                <div class="guide-section-heading">
+                  <p class="guide-kicker">Research modes</p>
+                  <h2 id="guide-modes-title">Choose by task and boundary</h2>
+                </div>
+                <div class="mode-ledger" role="list">
+                  <article class="mode-row" role="listitem">
+                    <div><span class="mode-index">A</span><h3>Automatic</h3></div>
+                    <p>Routes ordinary legal questions to installed sources and recognizes requests that belong in property lookup.</p>
+                    <span class="network-badge">Boundary varies</span>
+                  </article>
+                  <article class="mode-row" role="listitem">
+                    <div><span class="mode-index">S</span><h3>Search sources only</h3></div>
+                    <p>Returns matching passages from the installed corpus without sending your question to a model provider.</p>
+                    <span class="local-action-badge">Local + free</span>
+                  </article>
+                  <article class="mode-row" role="listitem">
+                    <div><span class="mode-index">C</span><h3>Answer with citations</h3></div>
+                    <p>Sends your question and selected excerpts to the configured provider to draft an explanation grounded in citations.</p>
+                    <span class="paid-badge">May charge</span>
+                  </article>
+                  <article class="mode-row" role="listitem">
+                    <div><span class="mode-index">P</span><h3>Property lookup</h3></div>
+                    <p>Queries NYC Open Data for HPD violations by address or official building identifier.</p>
+                    <span class="network-badge">Network</span>
+                  </article>
+                </div>
+              </section>
+
+              <section class="result-shell guide-reading" aria-labelledby="guide-reading-title">
+                <div class="guide-section-heading">
+                  <p class="guide-kicker">Reading results</p>
+                  <h2 id="guide-reading-title">Three checks before you rely on anything</h2>
+                </div>
+                <ol class="reading-checks">
+                  <li><strong>Citation</strong><span>Does the section or record actually match your question?</span></li>
+                  <li><strong>Context</strong><span>Read the full excerpt and nearby provisions, not only the summary.</span></li>
+                  <li><strong>Currency</strong><span>Open the official source and confirm the law or record is current.</span></li>
+                </ol>
+              </section>
+            </div>
+
+            <aside class="guide-aside" aria-label="Using the site safely">
+              <section class="result-shell boundary-panel" aria-labelledby="guide-boundaries-title">
+                <p class="guide-kicker">Before you act</p>
+                <h2 id="guide-boundaries-title">Know the boundary</h2>
+                <ul class="boundary-list">
+                  <li>
+                    <span class="local-action-badge">Local</span>
+                    <p>Installed-source search and workspace records stay on this machine.</p>
+                  </li>
+                  <li>
+                    <span class="network-badge">Network</span>
+                    <p>Source updates and property lookup contact official external services.</p>
+                  </li>
+                  <li>
+                    <span class="paid-badge">May charge</span>
+                    <p>Generated answers, summaries, and semantic indexing can use your provider key. Review estimates and limits first.</p>
+                  </li>
+                </ul>
+                <button type="button" class="secondary-button boundary-settings" data-guide-target="settings">Review privacy and spending</button>
+              </section>
+
+              <section class="guide-question-panel" aria-labelledby="guide-questions-title">
+                <p class="guide-kicker">Good starting questions</p>
+                <h2 id="guide-questions-title">Be concrete</h2>
+                <ul class="question-examples">
+                  <li>What heat must a landlord provide during winter?</li>
+                  <li>Find the text of RPAPL section 711.</li>
+                  <li>Show open Class C violations at a specific address.</li>
+                </ul>
+              </section>
+
+              <section class="guide-caution" aria-labelledby="guide-caution-title">
+                <h2 id="guide-caution-title">General legal information</h2>
+                <p>This site does not give legal advice. Deadlines, facts, and recent changes can alter the answer; verify the official record and consult qualified counsel when needed.</p>
+              </section>
+            </aside>
           </div>
         </section>
 

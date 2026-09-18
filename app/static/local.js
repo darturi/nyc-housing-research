@@ -109,6 +109,10 @@ document.querySelectorAll("[data-view]").forEach((button) => {
   button.addEventListener("click", () => selectView(button.dataset.view));
 });
 
+document.querySelectorAll("[data-guide-target]").forEach((button) => {
+  button.addEventListener("click", () => selectView(button.dataset.guideTarget));
+});
+
 byId("setup-settings").addEventListener("click", () => selectView("settings"));
 
 byId("launch-form").addEventListener("submit", async (event) => {

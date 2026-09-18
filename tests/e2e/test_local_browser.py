@@ -205,6 +205,11 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             }
 
             page.get_by_text("Finish first setup").wait_for()
+            page.locator('[data-view="guide"]').click()
+            page.get_by_text(
+                "Evidence-backed NYC housing research", exact=False
+            ).wait_for()
+            page.get_by_role("button", name="Prepare sources").click()
             page.get_by_text("Recent activity", exact=True).click()
             source = page.locator("#source-list li").filter(
                 has_text="New York Real Property Actions and Proceedings Law"

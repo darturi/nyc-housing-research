@@ -202,6 +202,10 @@ Structural surfaces, controls, and buttons use near-square 2px corners. Fully ro
 
 - Results begin with a Filed Layer header, then numbered passages separated by one-pixel rules. Citation and excerpt lead; provenance remains visible; expansion and official-source actions stay at the end of each passage.
 
+### Product Guide
+
+- The Guide route uses a numbered, ruled workflow instead of a collection of equal cards. Mode rows pair each task with its local, network, or potential-cost boundary, and direct actions return the user to the relevant operating view.
+
 ## Do's and Don'ts
 
 ### Do:
