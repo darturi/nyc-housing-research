@@ -251,10 +251,11 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             page.locator('[data-view="settings"]').click()
             page.fill("#monthly-budget", "12.25")
             page.get_by_text("Advanced provider settings", exact=True).click()
-            page.select_option("#answer-profile", "openai-answer-luna-v1")
-            page.select_option(
-                "#embedding-profile", "openai-embedding-3-small-v1"
-            )
+            assert page.locator("#answer-profile").count() == 0
+            assert page.locator("#embedding-profile").count() == 0
+            page.get_by_text(
+                "Model selection is not configurable.", exact=False
+            ).wait_for()
             page.locator("#settings-form button[type=submit]").click()
             page.get_by_text(
                 "Changes saved. Restart before starting new provider-backed work."
@@ -265,7 +266,7 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             page.select_option("#credential-storage", "file")
             page.locator("#credential-form button[type=submit]").click()
             page.get_by_text(
-                "Key saved securely on this device.", exact=False
+                "The managed OpenAI models are now configured", exact=False
             ).wait_for()
             assert page.locator("#provider-key").input_value() == ""
             assert fixture_credential not in page.content()

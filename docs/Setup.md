@@ -102,8 +102,10 @@ one module into an incomplete corpus requires a separate partial-activation
 confirmation.
 
 The default fake profiles are synthetic test/demo adapters, not substantive
-answer models. Their output is labeled `synthetic_demo`; select the OpenAI
-profiles and configure a credential to enable real model-backed answers.
+answer models. Their output is labeled `synthetic_demo`. In the browser, adding
+an OpenAI key automatically activates the packaged answer and embedding profiles;
+model selection is intentionally not exposed. Operators can still inspect and
+configure profiles through the CLI.
 
 The Research view offers Auto, Search sources, Answer, and Property modes. Auto
 conservatively chooses only between free local source search and a typed property

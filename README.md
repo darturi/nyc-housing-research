@@ -50,7 +50,9 @@ a one-time launch code instead.
 
 The browser opens the Sources view when the corpus is absent and walks through
 source installation, provider/budget settings, optional credential setup, and
-semantic-index estimation. In scripts, `--configure-openai` requests the hidden
+semantic-index estimation. The browser intentionally locks answer generation and
+embeddings to the packaged OpenAI models; adding an OpenAI key activates those
+profiles automatically. In scripts, `--configure-openai` requests the hidden
 credential prompt and selects the packaged OpenAI profiles unless explicit profile
 arguments say otherwise; it does not validate the key or incur a charge.
 
@@ -141,6 +143,10 @@ and runs them. The five-source installer and bounded HPD connector have been
 live-verified; paid-answer, domain-review, parity, and independent clean-machine
 gates are recorded transparently in the acceptance report.
 
-No code license has yet been selected. Public visibility alone does not grant
-reuse rights; the maintainer must add an appropriate `LICENSE` before presenting
-this as an open-source release.
+The original source code and documentation in this repository are licensed under
+the [Apache License 2.0](LICENSE). Unless expressly stated otherwise, that license
+does not apply to third-party legal texts, government datasets, downloaded corpus
+artifacts, or third-party dependencies; those materials remain subject to their
+respective terms. See the [license decision](docs/License_Decision.md) and
+[third-party and source review](docs/Third_Party_and_Source_Review.md) for scope
+and remaining release checks.

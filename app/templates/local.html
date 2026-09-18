@@ -351,10 +351,9 @@
               </section>
 
               <details class="settings-disclosure">
-                <summary><span><strong>Advanced provider settings</strong><small>Models, timing, and simultaneous requests</small></span></summary>
+                <summary><span><strong>Advanced provider settings</strong><small>Timing and simultaneous requests</small></span></summary>
                 <div class="disclosure-content settings-form-grid">
-                  <div class="form-field"><label for="answer-profile">Answer model</label><select id="answer-profile"></select></div>
-                  <div class="form-field"><label for="embedding-profile">Embedding profile</label><select id="embedding-profile"></select></div>
+                  <p class="meta-line settings-form-note">Answer generation and semantic search use this release's managed OpenAI models. Model selection is not configurable.</p>
                   <div class="form-field"><label for="paid-concurrency">Simultaneous paid requests</label><select id="paid-concurrency"><option value="1">One at a time</option><option value="2">At most two</option></select></div>
                   <div class="form-field"><label for="answer-deadline">Stop waiting for an answer after (seconds)</label><input id="answer-deadline" type="number" min="5" max="300" required></div>
                 </div>

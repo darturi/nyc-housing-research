@@ -3,6 +3,7 @@ name = "nyc-housing-rag"
 version = "0.1.0"
 description = "Locally operated NYC housing-law research application"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.13.0",

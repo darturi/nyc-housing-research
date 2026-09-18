@@ -2,8 +2,9 @@
 
 Date: 2026-09-14
 
-This is a release-review inventory, not a legal conclusion. It records what the
-maintainer must verify before selecting a code license or redistributing source
+This is a release-review inventory, not a legal conclusion. The repository's
+original code and documentation use Apache-2.0; this inventory records what the
+maintainer must still verify before distributing dependencies or source
 artifacts. The authoritative texts are the license files shipped by each exact
 package/source and the publisher terms in force at publication time.
 
@@ -73,7 +74,7 @@ code and manifests, not the downloaded legal corpus or cached HPD records.
 
 ## Decisions still required
 
-1. Select the repository code license and any contributor terms.
+1. Confirm Apache-2.0 attribution and contributor practices for the final release.
 2. Complete a final exact-version dependency-license review and add required
    notices/attributions.
 3. Record a source-by-source redistribution decision. Until then, publish no

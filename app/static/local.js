@@ -971,8 +971,6 @@ async function loadSettings() {
   byId("operational-retention").value = settings.operational_retention_days;
   byId("usage-retention").value = settings.usage_retention_months;
   byId("offline-mode").checked = settings.offline;
-  populateProfiles("answer-profile", profiles.profiles.filter((p) => p.kind === "answer"), settings.answer_profile);
-  populateProfiles("embedding-profile", profiles.profiles.filter((p) => p.kind === "embedding"), settings.embedding_profile);
   const selectedProfiles = [
     profiles.profiles.find((item) => item.id === settings.answer_profile),
     profiles.profiles.find((item) => item.id === settings.embedding_profile),
@@ -1005,20 +1003,6 @@ async function loadSettings() {
     : "Test connection (may charge)";
 }
 
-function populateProfiles(id, profiles, selected) {
-  const select = byId(id);
-  select.replaceChildren();
-  profiles.forEach((profile) => {
-    const option = document.createElement("option");
-    option.value = profile.id;
-    option.textContent = profile.provider === "fake"
-      ? `${profile.model} (synthetic test only)`
-      : `${profile.model} (${profile.provider})`;
-    option.selected = profile.id === selected;
-    select.append(option);
-  });
-}
-
 byId("settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -1033,8 +1017,6 @@ byId("settings-form").addEventListener("submit", async (event) => {
         property_cache_retention_days: Number.parseInt(byId("property-cache-retention").value, 10),
         operational_retention_days: Number.parseInt(byId("operational-retention").value, 10),
         usage_retention_months: Number.parseInt(byId("usage-retention").value, 10),
-        answer_profile: byId("answer-profile").value,
-        embedding_profile: byId("embedding-profile").value,
         offline: byId("offline-mode").checked,
       }),
     });
@@ -1095,8 +1077,11 @@ byId("credential-form").addEventListener("submit", async (event) => {
       }),
     });
     input.value = "";
+    await loadSettings();
     setCredentialOverview(true, selectedCredentialSlot);
-    byId("credential-status").textContent = "Key saved securely on this device. Test the connection before relying on it.";
+    byId("credential-status").textContent = result.profiles_activated
+      ? "Key saved securely. The managed OpenAI models are now configured; restart before model-backed work."
+      : "Key saved securely on this device. Test the connection before relying on it.";
   } catch (error) {
     input.value = "";
     byId("credential-status").textContent = error.message;

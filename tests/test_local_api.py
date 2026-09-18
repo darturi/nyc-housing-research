@@ -130,7 +130,14 @@ def test_protected_api_search_settings_credentials_and_usage(tmp_path) -> None:
             json={"credential": credential, "storage": "file"},
         )
         assert stored.status_code == 200
+        assert stored.json()["profiles_activated"] is True
         assert credential not in stored.text
+        locked_settings = client.get("/api/v1/settings").json()
+        assert locked_settings["answer_profile"] == "openai-answer-luna-v1"
+        assert (
+            locked_settings["embedding_profile"]
+            == "openai-embedding-3-small-v1"
+        )
         generic_stored = client.post(
             "/api/v1/credentials",
             headers=_mutation_headers(csrf),
@@ -148,6 +155,12 @@ def test_protected_api_search_settings_credentials_and_usage(tmp_path) -> None:
             json={"api_key": credential},
         )
         assert rejected_secret.status_code == 400
+        rejected_model_choice = client.patch(
+            "/api/v1/settings",
+            headers=_mutation_headers(csrf),
+            json={"answer_profile": "fake-answer-small"},
+        )
+        assert rejected_model_choice.status_code == 400
         validation_estimate = client.get(
             "/api/v1/credentials/openai/validation-estimate"
         )

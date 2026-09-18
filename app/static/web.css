@@ -1704,6 +1704,11 @@ dd {
   gap: 14px;
 }
 
+.local-app .settings-form-note {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .local-app .settings-form {
   gap: 0;
 }

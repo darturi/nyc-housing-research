@@ -50,6 +50,7 @@ from app.providers.profiles import (
     ProfileKind,
     configured_profile_entries,
     get_configured_profile,
+    get_profile,
 )
 from app.providers.validation import (
     credential_validation_estimate,
@@ -295,8 +296,6 @@ def create_local_app(
                 "per_operation_budget_usd",
                 "max_concurrent_paid_requests",
                 "answer_deadline_seconds",
-                "answer_profile",
-                "embedding_profile",
                 "offline",
                 "property_cache_max_mb",
                 "property_cache_retention_days",
@@ -332,16 +331,26 @@ def create_local_app(
 
     @app.put("/api/v1/credentials/{provider}")
     async def replace_credential(provider: str, request: Request) -> JSONResponse:
+        nonlocal context
         try:
             payload = await request.json()
         except Exception:
             return JSONResponse(
                 {"error": "Credential request must be JSON."}, status_code=400
             )
-        return _store_credential(context, provider, payload)
+        try:
+            result = _store_credential(context, provider, payload)
+            context, activated = _activate_packaged_openai_profiles(
+                context, provider
+            )
+            app.state.workspace = context
+        except (AttributeError, CredentialStoreError, LocalSettingsError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(result | {"profiles_activated": activated})
 
     @app.post("/api/v1/credentials")
     async def create_or_replace_credential(request: Request) -> JSONResponse:
+        nonlocal context
         try:
             payload = await request.json()
             provider = str(payload.get("provider", ""))
@@ -349,7 +358,15 @@ def create_local_app(
             return JSONResponse(
                 {"error": "Credential request must be JSON."}, status_code=400
             )
-        return _store_credential(context, provider, payload)
+        try:
+            result = _store_credential(context, provider, payload)
+            context, activated = _activate_packaged_openai_profiles(
+                context, provider
+            )
+            app.state.workspace = context
+        except (AttributeError, CredentialStoreError, LocalSettingsError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(result | {"profiles_activated": activated})
 
     @app.get("/api/v1/credentials/{provider}/validation-estimate")
     def validation_estimate(provider: str) -> JSONResponse:
@@ -1230,32 +1247,44 @@ def _security_error(message: str, status_code: int) -> JSONResponse:
 
 def _store_credential(
     context: WorkspaceContext, provider: str, payload: object
-) -> JSONResponse:
-    try:
-        if provider not in configured_credential_slots(context.settings):
-            raise CredentialStoreError(
-                "Credential slot is not used by a configured provider profile."
-            )
-        if not isinstance(payload, dict) or not set(payload) <= {
-            "provider",
-            "credential",
-            "storage",
-        }:
-            raise CredentialStoreError(
-                "Credential request contains unsupported fields."
-            )
-        value = validate_credential(provider, str(payload.get("credential", "")))
-        backend = str(payload.get("storage", "keyring"))
-        CredentialResolver(context).writable(backend).set(provider, value)
-    except (AttributeError, CredentialStoreError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(
-        {
-            "provider": provider,
-            "present": True,
-            "source": "keyring" if backend == "keyring" else "secret_file",
-        }
-    )
+) -> dict[str, object]:
+    if provider not in configured_credential_slots(context.settings):
+        raise CredentialStoreError(
+            "Credential slot is not used by a configured provider profile."
+        )
+    if not isinstance(payload, dict) or not set(payload) <= {
+        "provider",
+        "credential",
+        "storage",
+    }:
+        raise CredentialStoreError(
+            "Credential request contains unsupported fields."
+        )
+    value = validate_credential(provider, str(payload.get("credential", "")))
+    backend = str(payload.get("storage", "keyring"))
+    CredentialResolver(context).writable(backend).set(provider, value)
+    return {
+        "provider": provider,
+        "present": True,
+        "source": "keyring" if backend == "keyring" else "secret_file",
+    }
+
+
+def _activate_packaged_openai_profiles(
+    context: WorkspaceContext, provider: str
+) -> tuple[WorkspaceContext, bool]:
+    if provider != "openai":
+        return context, False
+    updates: dict[str, str] = {}
+    if get_profile(context.settings.answer_profile).provider == "fake":
+        updates["answer_profile"] = "openai-answer-luna-v1"
+    if get_profile(context.settings.embedding_profile).provider == "fake":
+        updates["embedding_profile"] = "openai-embedding-3-small-v1"
+    if not updates:
+        return context, False
+    settings = replace(context.settings, **updates).validate()
+    save_local_settings(context.paths, settings)
+    return replace(context, settings=settings), True
 
 
 def _property_query(payload: object) -> PropertyQuery:
