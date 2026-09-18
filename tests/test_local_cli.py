@@ -200,6 +200,8 @@ def test_local_app_labels_synthetic_content(tmp_path) -> None:
     assert 'id="setup-guidance"' in home.text
     assert 'id="operation-budget"' in home.text
     assert 'id="workspace-summary"' in home.text
+    assert 'id="credential-check"' in home.text
+    assert "does not access your OS credential store during startup" in home.text
     assert 'data-view="guide"' in home.text
     assert 'id="view-guide"' in home.text
     assert "Evidence-backed NYC housing research" in home.text

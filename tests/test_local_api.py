@@ -56,7 +56,13 @@ def _wait_job(client, job_id):
     raise AssertionError(f"Job did not finish: {result}")
 
 
-def test_protected_api_search_settings_credentials_and_usage(tmp_path) -> None:
+def test_protected_api_search_settings_credentials_and_usage(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "app.credentials.store.KeyringCredentialStore.available",
+        lambda _self: False,
+    )
     context, app = _prepared_app(tmp_path)
     with TestClient(app, base_url="http://127.0.0.1") as client:
         csrf = _authenticate(client, app)
@@ -149,6 +155,14 @@ def test_protected_api_search_settings_credentials_and_usage(tmp_path) -> None:
         )
         assert generic_stored.status_code == 200
         assert credential not in generic_stored.text
+        provider_status = client.get("/api/v1/credentials/openai")
+        assert provider_status.status_code == 200
+        assert provider_status.json()["credential"] == {
+            "provider": "openai",
+            "present": True,
+            "source": "secret_file",
+        }
+        assert credential not in provider_status.text
         rejected_secret = client.patch(
             "/api/v1/settings",
             headers=_mutation_headers(csrf),
@@ -187,6 +201,27 @@ def test_protected_api_search_settings_credentials_and_usage(tmp_path) -> None:
     )
     assert "http_error_response" in diagnostic_text
     assert credential not in diagnostic_text
+
+
+def test_browser_status_does_not_access_the_os_credential_store(
+    tmp_path, monkeypatch
+) -> None:
+    context, app = _prepared_app(tmp_path)
+
+    def unexpected_credential_access(_self, _provider):
+        raise AssertionError("browser status must not access credentials")
+
+    monkeypatch.setattr(
+        "app.credentials.store.CredentialResolver.presence",
+        unexpected_credential_access,
+    )
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _authenticate(client, app)
+        response = client.get("/api/v1/status")
+
+    assert response.status_code == 200
+    assert response.json()["credentials"] == []
+    assert response.json()["credentials_checked"] is False
 
 
 def test_answer_job_exposes_evidence_and_keeps_question_memory_only(tmp_path) -> None:

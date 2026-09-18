@@ -239,7 +239,7 @@ def create_local_app(
 
     @app.get("/api/v1/status")
     def local_status() -> JSONResponse:
-        payload = workspace_status(context, storage)
+        payload = workspace_status(context, storage, include_credentials=False)
         payload["mode"] = "local"
         capabilities = payload["capabilities"]
         capabilities["synthetic_demo"] = True
@@ -328,6 +328,23 @@ def create_local_app(
         except CredentialStoreError as exc:
             return JSONResponse({"credentials": [], "error": str(exc)}, status_code=503)
         return JSONResponse({"credentials": result})
+
+    @app.get("/api/v1/credentials/{provider}")
+    def provider_credential_status(provider: str) -> JSONResponse:
+        if provider not in configured_credential_slots(context.settings):
+            return JSONResponse(
+                {
+                    "error": (
+                        "Credential slot is not used by a configured provider profile."
+                    )
+                },
+                status_code=400,
+            )
+        try:
+            result = asdict(CredentialResolver(context).presence(provider))
+        except CredentialStoreError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        return JSONResponse({"credential": result})
 
     @app.put("/api/v1/credentials/{provider}")
     async def replace_credential(provider: str, request: Request) -> JSONResponse:

@@ -7,7 +7,6 @@ import mimetypes
 import os
 import sys
 import uuid
-import webbrowser
 from collections.abc import Sequence
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
@@ -103,6 +102,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Block application-managed remote HTTP access.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    start = commands.add_parser(
+        "start", help="Prepare free source search and open the browser in one step."
+    )
+    # Also accept workspace options after `start` for bootstrap-script forwarding.
+    start.add_argument("--data-dir", default=argparse.SUPPRESS)
+    start.add_argument("--config", default=argparse.SUPPRESS)
+    start.add_argument("--offline", action="store_true", default=argparse.SUPPRESS)
+    start.add_argument("--port", type=int, help="Use this specific loopback port.")
+    start.add_argument("--no-browser", action="store_true")
+    start.add_argument(
+        "--skip-core", action="store_true", help="Skip source downloads."
+    )
+    start.add_argument(
+        "--setup-only", action="store_true", help="Prepare without serving."
+    )
 
     setup = commands.add_parser("setup", help="Initialize a local workspace.")
     setup.add_argument("--port", type=int, help="Set the default loopback port.")
@@ -561,6 +576,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         context = _context(args, initialize=args.command == "setup")
+        if args.command == "start":
+            from app.launcher import start_workspace
+
+            return start_workspace(
+                context, skip_core=args.skip_core, setup_only=args.setup_only,
+                no_browser=args.no_browser, port=args.port,
+            )
         if args.command == "setup":
             return _setup(context, args)
         if args.command == "status":
@@ -607,6 +629,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _benchmark(args)
         if args.command == "update-check":
             return _update_check(context, args)
+    except KeyboardInterrupt:
+        print("\nStopped. Rerun the same command to reopen.", file=sys.stderr)
+        return EXIT_INTERRUPTED
     except (LocalSettingsError, SchemaVersionError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return EXIT_INVALID_CONFIGURATION
@@ -950,26 +975,15 @@ def _serve(context: WorkspaceContext, args: argparse.Namespace) -> int:
     if not context.initialized:
         print("Workspace is not initialized; run nyc-housing setup.", file=sys.stderr)
         return EXIT_INVALID_CONFIGURATION
-    port = args.port or context.settings.port
+    port = context.settings.port if args.port is None else args.port
     if not 1 <= port <= 65535:
         print("Port must be between 1 and 65535.", file=sys.stderr)
         return EXIT_INVALID_CONFIGURATION
 
-    from app.local_app import create_local_app
+    from app.launcher import serve_workspace, workspace_launch_lock
 
-    application = create_local_app(context)
-    base_url = f"http://127.0.0.1:{port}/"
-    launch_url = f"{base_url}#launch={application.state.launch_token}"
-    print(f"Local workspace: {base_url}")
-    if context.settings.open_browser and not args.no_browser:
-        webbrowser.open(launch_url)
-    else:
-        print(f"One-time launch code: {application.state.launch_token}")
-
-    import uvicorn
-
-    uvicorn.run(application, host="127.0.0.1", port=port, workers=1)
-    return 0
+    with workspace_launch_lock(context.paths.root):
+        return serve_workspace(context, port=args.port, no_browser=args.no_browser)
 
 
 def _sources(context: WorkspaceContext, *, as_json: bool) -> int:

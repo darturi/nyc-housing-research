@@ -8,6 +8,39 @@ permissions:
   contents: read
 
 jobs:
+  bootstrap:
+    name: Fresh launcher / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/launcher-python
+      UV_CACHE_DIR: ${{ runner.temp }}/launcher-cache
+      UV_MANAGED_PYTHON: "1"
+      NYC_HOUSING_CONFIG: ""
+    steps:
+      - uses: actions/checkout@v4
+      # No setup-uv or setup-python: this tests the distribution entry path.
+      - name: First and offline repeat launch (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          sh start.sh --help
+          sh start.sh --data-dir "$RUNNER_TEMP/Launcher Space ü" --skip-core --setup-only
+          sh start.sh --data-dir "$RUNNER_TEMP/Launcher Space ü" --offline --setup-only
+      - name: First and offline repeat launch (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 --data-dir "$env:RUNNER_TEMP\Launcher Space ü" --skip-core --setup-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 --data-dir "$env:RUNNER_TEMP\Launcher Space ü" --offline --setup-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   native:
     name: Python 3.12 / ${{ matrix.os }}
     strategy:

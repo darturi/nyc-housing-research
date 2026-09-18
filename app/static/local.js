@@ -37,16 +37,18 @@ function formatMonth(value) {
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
-function setCredentialOverview(present, provider, detail = null) {
+function setCredentialOverview(present, provider, detail = null, checked = true) {
   const overview = byId("credential-overview");
-  overview.classList.toggle("is-connected", present);
-  overview.classList.toggle("needs-attention", !present);
-  byId("credential-summary").textContent = present
-    ? "API key connected"
-    : "No API key connected";
-  byId("credential-summary-detail").textContent = detail || (present
-    ? `Ready for optional ${provider} features. Test the connection before relying on it.`
-    : "Add a key to use optional answers and improved search.");
+  overview.classList.toggle("is-connected", checked && present);
+  overview.classList.toggle("needs-attention", checked && !present);
+  byId("credential-summary").textContent = checked
+    ? (present ? "API key connected" : "No API key connected")
+    : "API key not checked";
+  byId("credential-summary-detail").textContent = detail || (checked
+    ? (present
+      ? `Ready for optional ${provider} features. Test the connection before relying on it.`
+      : "Add a key to use optional answers and improved search.")
+    : "Keyless search is ready. The app does not access your OS credential store during startup.");
   byId("credential-save").textContent = present ? "Replace key" : "Add key";
 }
 
@@ -961,10 +963,9 @@ byId("source-rollback").addEventListener("click", async () => {
 });
 
 async function loadSettings() {
-  const [settings, profiles, credentials] = await Promise.all([
+  const [settings, profiles] = await Promise.all([
     api("/api/v1/settings"),
     api("/api/v1/profiles"),
-    api("/api/v1/credentials"),
   ]);
   byId("monthly-budget").value = settings.monthly_budget_usd;
   byId("operation-budget").value = settings.per_operation_budget_usd;
@@ -988,23 +989,35 @@ async function loadSettings() {
   byId("provider-key-label").textContent = selectedCredentialSlot === "openai"
     ? "OpenAI API key"
     : `${selectedCredentialSlot} API key`;
-  const selectedCredential = credentials.credentials.find(
-    (item) => item.provider === selectedCredentialSlot,
-  );
-  const credentialPresent = Boolean(selectedCredential?.present);
-  setCredentialOverview(credentialPresent, selectedCredentialSlot);
-  byId("credential-status").textContent = credentialPresent
-    ? "The saved key is write-only and has not been tested in this session."
-    : "";
-  if (selectedCredential?.source === "keyring") {
-    byId("credential-storage").value = "keyring";
-  } else if (selectedCredential?.source === "secret_file") {
-    byId("credential-storage").value = "file";
-  }
+  setCredentialOverview(false, selectedCredentialSlot, null, false);
+  byId("credential-status").textContent = "";
   byId("credential-validate").disabled = selectedCredentialIsCustom;
   byId("credential-validate").textContent = selectedCredentialIsCustom
     ? "Test custom connection in the terminal"
     : "Test connection (may charge)";
+}
+
+async function loadCredentialStatus() {
+  const target = byId("credential-status");
+  target.textContent = "Checking the OS credential store; macOS may request permission.";
+  try {
+    const result = await api(
+      `/api/v1/credentials/${encodeURIComponent(selectedCredentialSlot)}`,
+    );
+    const credential = result.credential;
+    const present = Boolean(credential?.present);
+    setCredentialOverview(present, selectedCredentialSlot);
+    target.textContent = present
+      ? "A saved key exists. It is write-only and has not been tested in this session."
+      : "No saved key was found.";
+    if (credential?.source === "keyring") {
+      byId("credential-storage").value = "keyring";
+    } else if (credential?.source === "secret_file") {
+      byId("credential-storage").value = "file";
+    }
+  } catch (error) {
+    target.textContent = error.message;
+  }
 }
 
 byId("settings-form").addEventListener("submit", async (event) => {
@@ -1068,6 +1081,8 @@ async function runRetention(apply) {
 
 byId("retention-preview").addEventListener("click", () => runRetention(false));
 byId("retention-apply").addEventListener("click", () => runRetention(true));
+
+byId("credential-check").addEventListener("click", loadCredentialStatus);
 
 byId("credential-form").addEventListener("submit", async (event) => {
   event.preventDefault();

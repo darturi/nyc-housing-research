@@ -34,7 +34,10 @@ from app.workspace.context import WorkspaceContext
 
 
 def workspace_status(
-    context: WorkspaceContext, storage: LocalStorage
+    context: WorkspaceContext,
+    storage: LocalStorage,
+    *,
+    include_credentials: bool = True,
 ) -> dict[str, object]:
     corpus = CorpusService(storage).status()
     with storage.corpus_engine.connect() as connection:
@@ -84,13 +87,14 @@ def workspace_status(
     )
     credentials: list[dict] = []
     credential_error = None
-    try:
-        credentials = [
-            asdict(CredentialResolver(context).presence(provider))
-            for provider in configured_credential_slots(context.settings)
-        ]
-    except CredentialStoreError as exc:
-        credential_error = str(exc)
+    if include_credentials:
+        try:
+            credentials = [
+                asdict(CredentialResolver(context).presence(provider))
+                for provider in configured_credential_slots(context.settings)
+            ]
+        except CredentialStoreError as exc:
+            credential_error = str(exc)
     answer_profile = get_configured_profile(context.settings, ProfileKind.ANSWER)
     answer_slot = answer_profile.credential_slot or answer_profile.provider
     answer_credential_present = any(
@@ -115,6 +119,7 @@ def workspace_status(
             "embedding": context.settings.embedding_profile,
         },
         "credentials": credentials,
+        "credentials_checked": include_credentials,
         "credential_status_error": credential_error,
         "jobs": {"counts": job_counts, "reported_limit": 100},
         "property_cache": {

@@ -22,6 +22,7 @@ Desktop.ini
 .env.*
 !.env.example
 .venv/
+.bootstrap/
 
 # Python caches and test output
 __pycache__/

@@ -1,0 +1,2 @@
+include start.sh start.ps1 .python-version uv.lock
+include docs/Setup.md docs/Troubleshooting.md docs/One_Command_Setup_Plan.md

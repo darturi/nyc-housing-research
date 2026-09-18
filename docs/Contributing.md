@@ -2,6 +2,10 @@
 
 ## Development setup
 
+Ordinary users start with `sh start.sh` / `start.ps1`; see [Setup](Setup.md).
+Those scripts include keyring support and retain extra packages in an existing
+environment. Contributor commands below intentionally install the developer tools.
+
 ```bash
 uv sync --locked --extra dev
 uv run ruff check .

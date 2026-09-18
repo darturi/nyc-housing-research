@@ -21,6 +21,8 @@ os.environ["ANSWER_LLM_PROVIDER"] = "fake"
 os.environ["ANSWER_LLM_MODEL"] = "fake-answer-small"
 os.environ["EMBEDDING_API_KEY"] = ""
 os.environ["ANSWER_LLM_API_KEY"] = ""
+# Never let ordinary tests unlock, read, or modify a developer's real OS keychain.
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
 
 import pytest  # noqa: E402
 

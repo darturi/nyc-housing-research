@@ -1,6 +1,35 @@
 # Troubleshooting and recovery
 
-Start with:
+## One-command launch
+
+Start by rerunning `sh start.sh` (macOS/Linux) or
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1` (Windows).
+The launcher preserves settings and installed publications and retries eligible
+unfinished free source installation. Read the stage label above any error.
+
+- **Runtime or dependency download fails:** check internet/proxy access to Astral,
+  GitHub (Python/runtime downloads) and Python package indexes, then rerun. No
+  workspace source installation starts until dependencies are ready. On a system
+  without curl or wget, install one using the operating system's package manager.
+- **Windows policy blocks the script:** use the full PowerShell command above;
+  it selects the policy for that invocation only. Organization-managed policies
+  may require your administrator's help.
+- **Sources fail to download:** the app still opens. Use Sources to retry/resume,
+  or stop with Ctrl+C and repeat the launch command. After a forced termination,
+  an old worker lease can take up to five minutes to expire. Downloads can repeat.
+- **The app is already running:** use the existing browser and terminal, or stop
+  that terminal process with Ctrl+C and launch again. Do not delete lock files.
+- **Browser did not open:** open the printed local address and paste the printed
+  one-time code. Use `--no-browser` when you want this behavior deliberately.
+- **Port conflict:** the default automatically falls back to a free local port.
+  Remove an explicit `--port` option or choose another port.
+- **Offline dependencies are missing:** first use requires internet; rerun without
+  `--offline`. Offline cannot install uncached runtimes, dependencies or sources.
+- **Incompatible/incomplete workspace:** keep it intact. Use its matching app
+  version or restore a verified backup into a new workspace. The launcher will
+  not stamp schema versions, overwrite databases, or silently migrate them.
+
+For deeper diagnostics in an existing uv environment, start with:
 
 ```bash
 uv run nyc-housing status --json

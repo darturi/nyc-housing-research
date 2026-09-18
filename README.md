@@ -29,32 +29,47 @@ requirements.
 
 ## Quick start from a clone
 
-Prerequisites: Git and [uv](https://docs.astral.sh/uv/), plus Python 3.12 (uv can
-install it). From the cloned repository:
+After cloning, open a terminal in the repository and run one command.
+On macOS or Linux:
 
 ```bash
-uv sync --locked
-uv run nyc-housing setup
-uv run nyc-housing serve
+sh start.sh
 ```
 
-Setup creates an OS-appropriate local workspace and, in an interactive terminal,
-offers both the five-source text-only corpus and optional user-supplied OpenAI
-configuration. It explains the data/cost boundary before prompting; storing the
-credential and selecting the packaged profiles makes no network request or charge.
-If an OS keyring is unavailable, setup offers an explicit owner-only file or
-environment-managed route. Use `--skip-core` to initialize without the corpus
-offer, or `--install-core` in scripts and other non-interactive environments.
-`serve` binds only to `127.0.0.1` and opens a browser; use `--no-browser` to print
-a one-time launch code instead.
+On Windows, in PowerShell:
 
-The browser opens the Sources view when the corpus is absent and walks through
-source installation, provider/budget settings, optional credential setup, and
-semantic-index estimation. The browser intentionally locks answer generation and
-embeddings to the packaged OpenAI models; adding an OpenAI key activates those
-profiles automatically. In scripts, `--configure-openai` requests the hidden
-credential prompt and selects the packaged OpenAI profiles unless explicit profile
-arguments say otherwise; it does not validate the key or incur a charge.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+The launcher obtains the tested runtime and Python 3.12 if needed, installs the
+locked dependencies with secure-key-storage support, creates your local workspace,
+downloads and verifies the five official sources, and opens the browser. There
+are no setup questions and no model charges. An internet connection and a modern
+browser are needed for first use; macOS/Linux also need `curl` or `wget`.
+You do not need to install Python or uv yourself, edit `.env`, or activate an
+environment. No administrator access or shell-profile changes are required.
+
+Keep the terminal open while using the app. Press **Ctrl+C** to stop it. Run the
+same command to reopen: it preserves your settings and installed sources. Source
+updates remain available in the browser. If a publisher is unavailable, the
+browser opens with recovery controls; rerunning the command retries unfinished
+free installation. Runtime/dependency failures stop with a terminal error.
+
+Optional arguments include `--no-browser`, `--skip-core`, `--setup-only`,
+`--offline`, and `--data-dir "PATH"`; use `--help` for a summary. Offline first use
+requires an already available runtime/dependency cache and skips source downloads.
+If you already manage uv, the equivalent application command is
+`uv run --extra credentials nyc-housing start`.
+
+Free source search is ready after installation. To enable optional AI answers,
+open **Settings** and add your OpenAI API key. Adding a key selects the packaged
+models without a paid request; restart with the same launch command when prompted.
+Connection testing and improved search have separate cost estimates and approval.
+The browser opens Sources if installation was skipped or could not finish.
+
+See [Setup](docs/Setup.md) for optional configuration and
+[the implementation plan](docs/One_Command_Setup_Plan.md) for the launcher design.
 
 Keyless search is available after the corpus installs:
 
@@ -62,7 +77,7 @@ Keyless search is available after the corpus installs:
 uv run nyc-housing search "RPAPL section 711"
 ```
 
-To enable real model-backed answers and semantic search:
+For advanced CLI users, the separate model configuration commands are:
 
 ```bash
 uv run nyc-housing profiles select answer openai-answer-luna-v1

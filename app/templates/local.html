@@ -297,7 +297,7 @@
             </div>
             <div class="credential-overview" id="credential-overview">
               <span class="status-dot" aria-hidden="true"></span>
-              <span><strong id="credential-summary">Checking connection…</strong><small id="credential-summary-detail">Your key is never displayed after it is saved.</small></span>
+              <span><strong id="credential-summary">API key not checked</strong><small id="credential-summary-detail">Keyless search is ready. The app does not access your OS credential store during startup.</small></span>
             </div>
             <form id="credential-form" class="query-form credential-form">
               <div class="credential-entry">
@@ -305,6 +305,7 @@
                 <button id="credential-save" type="submit">Add key</button>
               </div>
               <div class="credential-secondary-actions">
+                <button id="credential-check" type="button" class="secondary-button">Check for saved key</button>
                 <button id="credential-validate" type="button" class="secondary-button">Test connection (may charge)</button>
                 <details class="inline-disclosure credential-storage-details">
                   <summary>How your key is stored</summary>

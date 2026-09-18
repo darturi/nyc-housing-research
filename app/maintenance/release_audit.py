@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
 FORBIDDEN_DIRECTORY_NAMES = {
+    ".bootstrap",
     ".git",
     ".mypy_cache",
     ".pytest_cache",

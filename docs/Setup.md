@@ -2,8 +2,8 @@
 
 ## Supported release-candidate environment
 
-- Python 3.12 exactly; `.python-version`, package metadata, and CI agree.
-- `uv` 0.11.14 is used by the checked-in CI workflow.
+- Python 3.12 and uv 0.11.14 are obtained by the launcher when needed. There is
+  no separate runtime installation step.
 - macOS arm64 is locally verified. Linux and Windows jobs are configured but are
   not advertised as verified until the GitHub workflow has run successfully.
 - A modern browser with cookies and JavaScript enabled.
@@ -15,12 +15,86 @@ No PostgreSQL server, object store, app server, or maintainer account is needed.
 
 ## Install from a clone
 
+Run this from the cloned repository on macOS/Linux:
+
 ```bash
-uv sync --locked --extra credentials
-uv run nyc-housing setup
+sh start.sh
 ```
 
-`setup` is idempotent. It creates two local SQLite databases, an artifact tree,
+On Windows, use PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+The launcher handles four stages without questions:
+
+1. Find the tested uv version or download it from Astral into `.bootstrap`.
+2. Obtain Python 3.12 if needed and install locked dependencies into `.venv`,
+   including the optional keyring package.
+3. Create the local workspace and download, check, and index the five official
+   publications for free search (approximately 70 MB of source data in the
+   measured candidate). Existing source libraries are reused.
+4. Bind to a local port and open the browser after the server is ready.
+
+First use requires internet access, a browser, and on macOS/Linux `curl` or
+`wget`. The scripts do not change shell profiles, install global Python packages,
+require administrator access, or read `.env`. Python installations and download
+caches use uv's normal user directories. Existing extra developer packages are
+preserved during dependency synchronization.
+
+Leave the terminal open while researching. **Ctrl+C** stops the application;
+the same command reopens it. If the preferred port is busy, the launcher selects
+another free local port. If you request a specific port, it instead reports the
+conflict. A second launcher for the same workspace reports that it is already
+running. Closing the browser tab alone does not stop the terminal process.
+
+OpenAI keys are optional: add one through **Settings → API access** and restart
+with the same launch command when requested. Source search needs no key. The
+launcher never tests credentials, builds embeddings, or runs paid work. On systems
+without a usable OS key store, Settings offers the explicit owner-only file route.
+Opening the browser does not read the OS credential store. **Check for saved key**
+is an explicit action and may cause the operating system to request permission;
+adding or testing a key may do the same.
+
+### Optional launch controls
+
+Append these options to either platform's command:
+
+| Option | Behavior |
+| --- | --- |
+| `--no-browser` | Print the local URL and one-time code instead of opening a browser. |
+| `--setup-only` | Prepare the workspace/sources and exit; failed source setup returns a nonzero status. |
+| `--skip-core` | Skip automatic source installation and use the browser Sources controls later. |
+| `--offline` | Block bootstrap/dependency downloads and application network calls; requires cached dependencies/runtime. |
+| `--data-dir "PATH"` | Select a different workspace; relative paths resolve from the terminal's current directory. |
+| `--config "PATH"` | Use a separate settings file. |
+| `--port 8123` | Require a particular local port. |
+| `--help` | Display options without downloading or initializing anything. |
+
+For example: `sh start.sh --data-dir "./my workspace" --setup-only`.
+An existing library, including a deliberately partial one, is preserved. Source
+updates and improved-search indexing remain explicit browser actions. If a
+publisher download fails, normal launch opens Sources for recovery; the terminal
+reports the incomplete installation. Running the same command retries the latest
+eligible free installation. A killed worker's lease may need up to five minutes
+to expire before it can be resumed. Individual downloads can be repeated during
+recovery; the launcher does not promise byte-range download resumption.
+
+`--offline` is a one-launch override and does not change saved settings. A saved
+offline preference in Settings still applies until explicitly changed there.
+
+### Manual setup for advanced users
+
+The individual commands remain available if you already manage uv:
+
+```bash
+uv sync --locked --extra credentials
+uv run nyc-housing start
+```
+
+The older interactive `uv run nyc-housing setup` is also available. `setup` is
+idempotent. It creates two local SQLite databases, an artifact tree,
 exports/backups directories, and nonsecret JSON settings. In an interactive
 terminal it explains and offers the resumable five-source, text-only download.
 That download contacts official publishers but never contacts a model provider
@@ -115,6 +189,11 @@ legal citation stay in legal search even if they also mention a building ID.
 
 ## Configure a user-supplied OpenAI key
 
+The normal route is **Settings → API access** in the browser. Save the key,
+review spending limits, and restart the app when prompted. Connection testing
+and the Sources view's improved-search index each display their own cost approval.
+The following separate CLI steps are for advanced operators:
+
 ```bash
 uv run nyc-housing profiles select answer openai-answer-luna-v1
 uv run nyc-housing profiles select embedding openai-embedding-3-small-v1
@@ -193,6 +272,9 @@ answers, actual local ledger deltas, and an explicit `domain_review_required`
 status. It is not a substitute for legal review.
 
 ## Start the browser application
+
+Use the same `sh start.sh` / Windows PowerShell launch command each time. For an
+already initialized workspace and environment, the lower-level command remains:
 
 ```bash
 uv run nyc-housing serve
