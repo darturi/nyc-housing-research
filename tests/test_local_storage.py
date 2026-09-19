@@ -13,11 +13,11 @@ def test_local_storage_creates_separate_versioned_databases(tmp_path) -> None:
     paths = resolve_workspace_paths(data_dir=tmp_path / "workspace", environment={})
     storage = LocalStorage.open(paths, initialize=True)
     try:
-        assert storage.versions() == {"corpus": 1, "state": 1}
+        assert storage.versions() == {"corpus": 2, "state": 1}
         assert paths.corpus_database.is_file()
         assert paths.state_database.is_file()
         manifest = json.loads(paths.manifest.read_text())
-        assert manifest["corpus_schema_version"] == 1
+        assert manifest["corpus_schema_version"] == 2
         assert manifest["state_schema_version"] == 1
     finally:
         storage.close()

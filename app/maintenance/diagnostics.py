@@ -25,6 +25,8 @@ from app.jobs.service import JobService
 from app.providers.profiles import ProfileKind, get_configured_profile
 from app.storage.database import LocalStorage
 from app.storage.schema import (
+    CORPUS_SCHEMA_VERSION,
+    STATE_SCHEMA_VERSION,
     generations,
     maintenance_state,
     property_cache,
@@ -207,7 +209,11 @@ def doctor_checks(
     if storage is not None:
         versions = storage.versions()
         checks["schema_versions"] = {
-            "ok": versions == {"corpus": 1, "state": 1},
+            "ok": versions
+            == {
+                "corpus": CORPUS_SCHEMA_VERSION,
+                "state": STATE_SCHEMA_VERSION,
+            },
             "value": versions,
         }
         for name, path in (

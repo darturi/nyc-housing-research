@@ -109,6 +109,14 @@
                         <option value="">All installed sources</option>
                       </select>
                     </div>
+                    <div class="form-field">
+                      <label for="research-scope">Resource scope</label>
+                      <select id="research-scope">
+                        <option value="core">Official only</option>
+                        <option value="user">My resources</option>
+                        <option value="all">Official + mine</option>
+                      </select>
+                    </div>
                     <div class="property-actions research-actions">
                       <button type="submit">Run research</button>
                       <button id="answer-cancel" type="button" class="secondary-button" hidden>Cancel answer</button>
@@ -264,6 +272,48 @@
               <button id="index-build" type="button" disabled>Improve search quality</button>
             </div>
             <p id="index-action-status" class="meta-line" aria-live="polite"></p>
+          </div>
+          <div class="result-shell sources-panel user-resources-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>My resources</h2>
+                <p>Add PDF, Markdown, or UTF-8 text files to local search.</p>
+              </div>
+              <span class="local-action-badge">Stored locally</span>
+            </div>
+            <form id="resource-form" class="query-form resource-form">
+              <div class="form-field resource-file-field">
+                <label for="resource-file">File (maximum 25 MiB)</label>
+                <input id="resource-file" name="file" type="file" accept=".pdf,.md,.markdown,.txt,application/pdf,text/plain,text/markdown" required>
+              </div>
+              <div class="form-field">
+                <label for="resource-title">Title</label>
+                <input id="resource-title" name="title" maxlength="255" placeholder="Defaults to the filename">
+              </div>
+              <div class="form-field">
+                <label for="resource-publisher">Publisher or author</label>
+                <input id="resource-publisher" name="publisher" maxlength="255">
+              </div>
+              <div class="form-field">
+                <label for="resource-category">Category</label>
+                <input id="resource-category" name="category" maxlength="80" value="reference">
+              </div>
+              <div class="form-field">
+                <label for="resource-jurisdiction">Jurisdiction</label>
+                <input id="resource-jurisdiction" name="jurisdiction" maxlength="120">
+              </div>
+              <div class="form-field">
+                <label for="resource-url">Original HTTPS URL (optional)</label>
+                <input id="resource-url" name="original_url" type="url" maxlength="2000" placeholder="https://…">
+              </div>
+              <label class="checkbox-label resource-consent" for="resource-model-use">
+                <input id="resource-model-use" name="model_use_allowed" type="checkbox" value="true">
+                <span><strong>Allow provider-backed features</strong><small>If enabled, excerpts may be embedded or sent to the configured model provider for answers.</small></span>
+              </label>
+              <button type="submit">Add resource</button>
+            </form>
+            <p id="resource-action-status" class="meta-line" aria-live="polite"></p>
+            <ul id="resource-list" class="citation-list"></ul>
           </div>
           <details class="result-shell jobs-panel disclosure-card">
             <summary>

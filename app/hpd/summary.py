@@ -11,7 +11,7 @@ from app.hpd.connector import PropertySearchResponse
 from app.jobs.runtime import Deadline
 from app.providers.gateway import ProviderExecutionError, ProviderGateway
 from app.providers.profiles import ProfileKind, get_configured_profile
-from app.retrieval.local import LocalSearch
+from app.retrieval.local import LocalSearch, LocalSearchFilters
 from app.storage.database import LocalStorage
 from app.usage.ledger import PaidCapacityUnavailable, SpendDenied
 from app.workspace.context import WorkspaceContext
@@ -70,7 +70,11 @@ class PropertySummaryService:
         selected_rows = property_result.records[:25]
         try:
             legal_results = LocalSearch(self._storage).search(
-                "housing maintenance violations repairs enforcement", limit=4
+                "housing maintenance violations repairs enforcement",
+                filters=LocalSearchFilters(
+                    origin="core", model_eligible_only=True
+                ),
+                limit=4,
             )
             legal_rows = legal_results.results
         except ValueError:
@@ -85,6 +89,11 @@ class PropertySummaryService:
                 source_name=row.source_name,
                 source_url=row.source_url,
                 publisher=row.publisher,
+                origin=row.origin,
+                category=row.category,
+                source_version_id=row.source_version_id,
+                content_hash=row.content_hash,
+                locator=row.locator,
                 retrieved_at=row.retrieved_at,
                 last_checked_at=row.last_checked_at,
                 effective_from=row.effective_from,

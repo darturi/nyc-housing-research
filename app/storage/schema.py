@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 
-CORPUS_SCHEMA_VERSION = 1
+CORPUS_SCHEMA_VERSION = 2
 STATE_SCHEMA_VERSION = 1
 
 corpus_metadata = MetaData()
@@ -37,9 +37,24 @@ source_modules = Table(
     Column("source_type", String(40), nullable=False),
     Column("publisher", String(255), nullable=False),
     Column("jurisdiction", String(120), nullable=False),
-    Column("source_url", Text, nullable=False),
+    Column("source_url", Text),
     Column("scope_json", Text, nullable=False),
     Column("manifest_json", Text, nullable=False),
+    Column("origin", String(40), nullable=False, default="core", server_default="core"),
+    Column(
+        "acquisition_kind",
+        String(40),
+        nullable=False,
+        default="managed_download",
+        server_default="managed_download",
+    ),
+    Column(
+        "model_use_allowed",
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="1",
+    ),
     Column("enabled", Boolean, nullable=False, default=True),
 )
 
@@ -63,6 +78,7 @@ source_versions = Table(
     Column("effective_to", DateTime(timezone=True)),
     Column("validation_state", String(40), nullable=False),
     Column("validation_json", Text, nullable=False),
+    Column("provenance_json", Text, nullable=False, default="{}", server_default="{}"),
     UniqueConstraint(
         "source_module_id",
         "content_hash",
@@ -84,7 +100,7 @@ documents = Table(
     ),
     Column("stable_id", String(255), nullable=False),
     Column("title", Text, nullable=False),
-    Column("source_url", Text, nullable=False),
+    Column("source_url", Text),
     UniqueConstraint(
         "source_version_id", "stable_id", name="uq_local_document_version_stable"
     ),
@@ -120,6 +136,7 @@ chunks = Table(
     Column("title", Text),
     Column("text", Text, nullable=False),
     Column("text_hash", String(64), nullable=False, index=True),
+    Column("locator_json", Text, nullable=False, default="{}", server_default="{}"),
     UniqueConstraint(
         "source_version_id", "stable_id", name="uq_local_chunk_version_stable"
     ),
@@ -233,6 +250,18 @@ corpus_state = Table(
     corpus_metadata,
     Column("id", Integer, primary_key=True),
     Column("active_generation_id", String(36)),
+)
+
+corpus_operations = Table(
+    "corpus_operations",
+    corpus_metadata,
+    Column("operation_id", String(64), primary_key=True),
+    Column("operation_type", String(80), nullable=False),
+    Column("source_module_id", String(36)),
+    Column("source_version_id", String(36)),
+    Column("generation_id", String(36), nullable=False),
+    Column("result_json", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
 state_schema_metadata = Table(

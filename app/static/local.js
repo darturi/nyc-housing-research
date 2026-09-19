@@ -56,7 +56,9 @@ async function api(path, options = {}) {
   const request = {...options, headers: {...(options.headers || {})}};
   if (request.method && !["GET", "HEAD"].includes(request.method)) {
     request.headers["X-CSRF-Token"] = csrfToken;
-    request.headers["Content-Type"] = "application/json";
+    if (!(request.body instanceof FormData)) {
+      request.headers["Content-Type"] = "application/json";
+    }
   }
   const response = await fetch(path, request);
   const body = await response.json();
@@ -117,6 +119,14 @@ document.querySelectorAll("[data-guide-target]").forEach((button) => {
 
 byId("setup-settings").addEventListener("click", () => selectView("settings"));
 
+byId("research-source").addEventListener("change", (event) => {
+  if (event.target.value.startsWith("user-")) {
+    byId("research-scope").value = "user";
+  } else if (event.target.value) {
+    byId("research-scope").value = "core";
+  }
+});
+
 byId("launch-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -154,13 +164,15 @@ byId("research-form").addEventListener("submit", async (event) => {
     }
     if (["auto", "search"].includes(selectedMode)) {
       const source = byId("research-source").value || undefined;
+      const scope = byId("research-scope").value;
       const body = await api("/api/v1/search", {
         method: "POST",
-        body: JSON.stringify({query: question, ...(source ? {source} : {})}),
+        body: JSON.stringify({query: question, scope, ...(source ? {source} : {})}),
       });
       renderEvidence(target, body.results, `Generation ${body.generation_id}`);
     } else {
       const source = byId("research-source").value || undefined;
+      const scope = byId("research-scope").value;
       const allowUnknownCost = !selectedAnswerPricingVerified;
       if (allowUnknownCost && !window.confirm(
         "This provider's price is unknown. Send this one-off answer request outside the app's USD budget caps? Provider charges may apply.",
@@ -169,6 +181,7 @@ byId("research-form").addEventListener("submit", async (event) => {
         method: "POST",
         body: JSON.stringify({
           question,
+          scope,
           ...(source ? {source} : {}),
           ...(allowUnknownCost ? {allow_unknown_cost: true} : {}),
         }),
@@ -335,6 +348,15 @@ function createCitationList(rows) {
       } catch (_) {
         // Invalid publisher metadata is shown without creating a link.
       }
+    }
+    if (row.origin === "user" && row.source_version_id && row.chunk_id) {
+      const resourceId = String(row.source_slug || "").replace(/^user-/, "");
+      const link = document.createElement("a");
+      link.href = `/api/v1/resources/${encodeURIComponent(resourceId)}/versions/${encodeURIComponent(row.source_version_id)}/chunks/${encodeURIComponent(row.chunk_id)}`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Open saved excerpt";
+      item.append(link);
     }
     list.append(item);
   });
@@ -731,7 +753,176 @@ async function loadSources() {
       filter.append(option);
     }
   });
+  renderResources(body.resources || [], filter);
 }
+
+function renderResources(resources, filter) {
+  const list = byId("resource-list");
+  list.replaceChildren();
+  if (!resources.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "No personal resources have been added.";
+    list.append(empty);
+    return;
+  }
+  resources.forEach((resource) => {
+    const item = document.createElement("li");
+    item.className = "citation-item resource-item";
+    const title = document.createElement("strong");
+    title.textContent = resource.name;
+    const detail = document.createElement("p");
+    detail.textContent = [
+      resource.category,
+      resource.publisher,
+      resource.jurisdiction,
+      `${resource.chunk_count} passage${resource.chunk_count === 1 ? "" : "s"}`,
+    ].filter(Boolean).join(" · ");
+    const status = document.createElement("span");
+    status.className = "citation-source";
+    status.textContent = `${resource.active ? "Searchable" : "Removed"} · ${resource.model_use_allowed ? "provider use allowed" : "local search only"} · added ${formatDate(resource.added_at)}`;
+    item.append(title, detail, status);
+
+    const actions = document.createElement("div");
+    actions.className = "property-actions resource-actions";
+    if (resource.active) {
+      const option = document.createElement("option");
+      option.value = resource.slug;
+      option.textContent = `My resource: ${resource.name}`;
+      filter.append(option);
+      actions.append(resourceButton("Replace file", () => replaceResource(resource)));
+      actions.append(resourceButton("Edit details", () => editResource(resource)));
+      actions.append(resourceButton(
+        resource.model_use_allowed ? "Disable provider use" : "Allow provider use",
+        () => setResourceModelUse(resource, !resource.model_use_allowed),
+      ));
+      actions.append(resourceButton("Remove", () => mutateResource(resource.id, "remove", {})));
+    } else {
+      actions.append(resourceButton("Restore", () => mutateResource(resource.id, "restore", {})));
+    }
+    const versionId = resource.active_version_id || resource.latest_version_id;
+    if (versionId) {
+      const download = document.createElement("a");
+      download.href = `/api/v1/resources/${encodeURIComponent(resource.id)}/versions/${encodeURIComponent(versionId)}/download`;
+      download.textContent = "Download original";
+      actions.append(download);
+    }
+    item.append(actions);
+    list.append(item);
+  });
+}
+
+function resourceButton(label, action) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button";
+  button.textContent = label;
+  button.addEventListener("click", action);
+  return button;
+}
+
+async function mutateResource(resourceId, operation, payload) {
+  const target = byId("resource-action-status");
+  try {
+    const result = await api(`/api/v1/resources/${encodeURIComponent(resourceId)}/${operation}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    target.textContent = `Resource ${result.result.status.replaceAll("_", " ")}.`;
+    await Promise.all([loadSources(), loadJobs()]);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+async function setResourceModelUse(resource, allowed) {
+  if (allowed && !window.confirm(
+    "Allow excerpts from this resource to be embedded or sent to the configured model provider when you explicitly use provider-backed features?",
+  )) return;
+  await mutateResource(resource.id, "model-use", {allowed});
+}
+
+async function editResource(resource) {
+  const title = window.prompt("Resource title", resource.name);
+  if (title === null) return;
+  const publisher = window.prompt("Publisher or author", resource.publisher || "");
+  if (publisher === null) return;
+  const category = window.prompt("Category", resource.category || "reference");
+  if (category === null) return;
+  const jurisdiction = window.prompt("Jurisdiction", resource.jurisdiction || "");
+  if (jurisdiction === null) return;
+  const originalUrl = window.prompt("Original HTTPS URL (optional)", resource.original_url || "");
+  if (originalUrl === null) return;
+  const target = byId("resource-action-status");
+  try {
+    const result = await api(`/api/v1/resources/${encodeURIComponent(resource.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title,
+        publisher,
+        category,
+        jurisdiction,
+        original_url: originalUrl,
+        expected_version_id: resource.active_version_id,
+      }),
+    });
+    target.textContent = `Resource ${result.result.status.replaceAll("_", " ")}.`;
+    await Promise.all([loadSources(), loadJobs()]);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+function replaceResource(resource) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".pdf,.md,.markdown,.txt,application/pdf,text/plain,text/markdown";
+  input.addEventListener("change", async () => {
+    if (!input.files?.length) return;
+    const form = new FormData();
+    form.append("file", input.files[0]);
+    form.append("expected_version_id", resource.active_version_id);
+    await submitResourceUpload(
+      `/api/v1/resources/${encodeURIComponent(resource.id)}/versions`, form,
+    );
+  });
+  input.click();
+}
+
+async function submitResourceUpload(path, form) {
+  const target = byId("resource-action-status");
+  try {
+    target.textContent = "Importing and validating the resource…";
+    const job = await api(path, {method: "POST", body: form});
+    await loadJobs();
+    await pollResourceJob(job.id);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+async function pollResourceJob(jobId) {
+  const target = byId("resource-action-status");
+  for (;;) {
+    const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+    target.textContent = `${job.stage.replaceAll("_", " ")} · ${job.state.replaceAll("_", " ")}`;
+    if (["succeeded", "failed", "cancelled"].includes(job.state)) {
+      await Promise.all([loadSources(), loadJobs(), loadWorkspaceStatus()]);
+      if (job.state === "failed") throw new Error(job.error_message || "Resource import failed.");
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+}
+
+byId("resource-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  await submitResourceUpload("/api/v1/resources", form);
+  if (!byId("resource-action-status").textContent.toLowerCase().includes("failed")) {
+    event.currentTarget.reset();
+    byId("resource-category").value = "reference";
+  }
+});
 
 async function loadWorkspaceStatus() {
   const body = await api("/api/v1/status");
@@ -781,6 +972,12 @@ async function loadJobs() {
     corpus_rollback: "Source rollback",
     corpus_index: "Search quality update",
     property_complete_export: "Property export",
+    resource_add: "Resource import",
+    resource_replace: "Resource replacement",
+    resource_edit: "Resource details update",
+    resource_remove: "Resource removal",
+    resource_restore: "Resource restoration",
+    resource_model_use: "Resource provider permission",
   };
   const stateNames = {
     queued: "Waiting",
@@ -817,6 +1014,7 @@ async function loadJobs() {
       item.append(cancel);
     }
     const resumable = job.job_type.startsWith("corpus_")
+      || ["resource_add", "resource_replace"].includes(job.job_type)
       || job.job_type === "property_complete_export";
     if (["paused", "failed"].includes(job.state) && job.retryable && resumable) {
       const resume = document.createElement("button");

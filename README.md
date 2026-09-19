@@ -12,6 +12,8 @@ current law before relying on a result.
 ## What works
 
 - Downloads and locally indexes five official legal/guidance modules.
+- Imports user-provided PDF, Markdown, and UTF-8 text resources for private local
+  search, with explicit per-resource consent before provider-backed use.
 - Searches citations and full text without an API key.
 - Optionally builds a local semantic index and generates evidence-cited answers
   with a user-supplied OpenAI key.
@@ -76,6 +78,20 @@ Keyless search is available after the corpus installs:
 ```bash
 uv run nyc-housing search "RPAPL section 711"
 ```
+
+Personal resources can be added from **Sources → My resources** in the browser,
+or from the CLI. They default to local keyword search only:
+
+```bash
+uv run nyc-housing resources add ./tenant-notes.md --title "Tenant notes"
+uv run nyc-housing search "radiator log" --scope mine
+uv run nyc-housing resources list --json
+```
+
+Use `resources model-use RESOURCE_ID allow` only when you want excerpts from
+that resource to be eligible for semantic indexing and cited model answers.
+Workspace backups include personal resources; portable corpus bundles exclude
+them.
 
 For advanced CLI users, the separate model configuration commands are:
 

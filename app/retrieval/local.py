@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from sqlalchemy import and_, case, select, text
@@ -78,6 +79,8 @@ class LocalSearchFilters:
     source_slug: str | None = None
     source_type: str | None = None
     jurisdiction: str | None = None
+    origin: str | None = None
+    model_eligible_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,8 +90,14 @@ class LocalSearchResult:
     source_name: str
     source_type: str
     jurisdiction: str
-    source_url: str
+    source_url: str | None
     publisher: str
+    origin: str
+    model_use_allowed: bool
+    source_version_id: str
+    content_hash: str
+    category: str
+    locator: dict[str, object]
     retrieved_at: str
     last_checked_at: str
     effective_from: str | None
@@ -161,6 +170,7 @@ class LocalSearch:
         limit: int = 10,
         query_vector: list[float] | None = None,
         embedding_profile_id: str | None = None,
+        generation_id: str | None = None,
     ) -> LocalSearchResponse:
         query = " ".join(query.split())
         if not query:
@@ -169,14 +179,14 @@ class LocalSearch:
             raise ValueError("Search limit must be between 1 and 100.")
         filters = filters or LocalSearchFilters()
         with self._storage.corpus_engine.connect() as connection:
-            generation_id = connection.scalar(
+            selected_generation = generation_id or connection.scalar(
                 select(corpus_state.c.active_generation_id).where(
                     corpus_state.c.id == 1
                 )
             )
-            if generation_id is None:
+            if selected_generation is None:
                 raise ValueError("No active legal corpus is installed.")
-            exact = self._exact(connection, generation_id, query, filters, limit)
+            exact = self._exact(connection, selected_generation, query, filters, limit)
             candidate_limit = limit * 4
             keyword_queries = list(
                 dict.fromkeys(
@@ -186,7 +196,7 @@ class LocalSearch:
             keyword_sets = [
                 self._keyword(
                     connection,
-                    generation_id,
+                    selected_generation,
                     keyword_query,
                     filters,
                     candidate_limit,
@@ -198,7 +208,7 @@ class LocalSearch:
                 keyword_sets.extend(
                     self._keyword(
                         connection,
-                        generation_id,
+                        selected_generation,
                         keyword_query,
                         hinted_filters,
                         candidate_limit,
@@ -215,7 +225,7 @@ class LocalSearch:
                     )
                 semantic = self._semantic(
                     connection,
-                    generation_id,
+                    selected_generation,
                     filters,
                     query_vector,
                     embedding_profile_id,
@@ -227,7 +237,7 @@ class LocalSearch:
             if semantic_status == "available":
                 methods.append("vector")
             return LocalSearchResponse(
-                generation_id=generation_id,
+                generation_id=selected_generation,
                 method="+".join(methods),
                 semantic_status=semantic_status,
                 results=tuple(merged),
@@ -270,8 +280,13 @@ class LocalSearch:
                     sm.name AS source_name,
                     sm.source_type AS source_type,
                     sm.jurisdiction AS jurisdiction,
+                    sm.origin AS origin,
+                    sm.model_use_allowed AS model_use_allowed,
                     d.source_url AS source_url,
                     sm.publisher AS publisher,
+                    sv.id AS source_version_id,
+                    sv.content_hash AS content_hash,
+                    sv.provenance_json AS provenance_json,
                     sv.retrieved_at AS retrieved_at,
                     sv.last_checked_at AS last_checked_at,
                     sv.effective_from AS effective_from,
@@ -279,6 +294,7 @@ class LocalSearch:
                     c.citation AS citation,
                     c.title AS title,
                     c.text AS text,
+                    c.locator_json AS locator_json,
                     bm25(chunk_fts, 0.0, 0.0, 10.0, 8.0, 1.0) AS rank
                 FROM chunk_fts
                 JOIN chunks c ON c.id = chunk_fts.chunk_id
@@ -438,8 +454,13 @@ def _result_select(*additional):
         source_modules.c.name.label("source_name"),
         source_modules.c.source_type.label("source_type"),
         source_modules.c.jurisdiction.label("jurisdiction"),
+        source_modules.c.origin.label("origin"),
+        source_modules.c.model_use_allowed.label("model_use_allowed"),
         documents.c.source_url.label("source_url"),
         source_modules.c.publisher.label("publisher"),
+        source_versions.c.id.label("source_version_id"),
+        source_versions.c.content_hash.label("content_hash"),
+        source_versions.c.provenance_json.label("provenance_json"),
         source_versions.c.retrieved_at.label("retrieved_at"),
         source_versions.c.last_checked_at.label("last_checked_at"),
         source_versions.c.effective_from.label("effective_from"),
@@ -447,6 +468,7 @@ def _result_select(*additional):
         chunks.c.citation,
         chunks.c.title,
         chunks.c.text,
+        chunks.c.locator_json,
         *additional,
     )
 
@@ -459,6 +481,10 @@ def _filter_conditions(filters: LocalSearchFilters):
         conditions.append(source_modules.c.source_type == filters.source_type)
     if filters.jurisdiction:
         conditions.append(source_modules.c.jurisdiction == filters.jurisdiction)
+    if filters.origin:
+        conditions.append(source_modules.c.origin == filters.origin)
+    if filters.model_eligible_only:
+        conditions.append(source_modules.c.model_use_allowed.is_(True))
     return conditions
 
 
@@ -471,11 +497,14 @@ def _sql_filter_conditions(
         ("slug", filters.source_slug),
         ("source_type", filters.source_type),
         ("jurisdiction", filters.jurisdiction),
+        ("origin", filters.origin),
     ):
         if value:
             parameter = f"filter_{field}"
             conditions.append(f"sm.{field} = :{parameter}")
             parameters[parameter] = value
+    if filters.model_eligible_only:
+        conditions.append("sm.model_use_allowed = 1")
     return conditions, parameters
 
 
@@ -484,6 +513,8 @@ def _row_matches_filters(row: dict, filters: LocalSearchFilters) -> bool:
         (not filters.source_slug or row["source_slug"] == filters.source_slug)
         and (not filters.source_type or row["source_type"] == filters.source_type)
         and (not filters.jurisdiction or row["jurisdiction"] == filters.jurisdiction)
+        and (not filters.origin or row["origin"] == filters.origin)
+        and (not filters.model_eligible_only or bool(row["model_use_allowed"]))
     )
 
 
@@ -494,11 +525,7 @@ def _source_hint_filters(
         return None
     for pattern, source_slug in SOURCE_HINTS:
         if pattern.search(query):
-            return LocalSearchFilters(
-                source_slug=source_slug,
-                source_type=filters.source_type,
-                jurisdiction=filters.jurisdiction,
-            )
+            return replace(filters, source_slug=source_slug)
     return None
 
 
@@ -541,26 +568,48 @@ def _merge_ranked(
             match_types.setdefault(chunk_id, set()).add(match_type)
     ordered = sorted(merged, key=lambda item: (-scores[item], item))[:limit]
     return [
-        LocalSearchResult(
-            chunk_id=chunk_id,
-            source_slug=merged[chunk_id]["source_slug"],
-            source_name=merged[chunk_id]["source_name"],
-            source_type=merged[chunk_id]["source_type"],
-            jurisdiction=merged[chunk_id]["jurisdiction"],
-            source_url=merged[chunk_id]["source_url"],
-            publisher=merged[chunk_id]["publisher"],
-            retrieved_at=_iso_timestamp(merged[chunk_id]["retrieved_at"]),
-            last_checked_at=_iso_timestamp(merged[chunk_id]["last_checked_at"]),
-            effective_from=_optional_iso_timestamp(merged[chunk_id]["effective_from"]),
-            effective_to=_optional_iso_timestamp(merged[chunk_id]["effective_to"]),
-            citation=merged[chunk_id]["citation"],
-            title=merged[chunk_id]["title"],
-            text=merged[chunk_id]["text"],
-            score=scores[chunk_id],
-            match_types=tuple(sorted(match_types[chunk_id])),
+        _search_result(
+            merged[chunk_id], scores[chunk_id], tuple(sorted(match_types[chunk_id]))
         )
         for chunk_id in ordered
     ]
+
+
+def _search_result(
+    row: dict, score: float, match_types: tuple[str, ...]
+) -> LocalSearchResult:
+    provenance = _json_object(row.get("provenance_json"))
+    is_user = row["origin"] == "user"
+    return LocalSearchResult(
+        chunk_id=row["chunk_id"],
+        source_slug=row["source_slug"],
+        source_name=str(provenance.get("title") or row["source_name"]),
+        source_type=row["source_type"],
+        jurisdiction=str(
+            (provenance.get("jurisdiction") or "")
+            if is_user
+            else row["jurisdiction"]
+        ),
+        source_url=row["source_url"],
+        publisher=str(
+            (provenance.get("publisher") or "") if is_user else row["publisher"]
+        ),
+        origin=row["origin"],
+        model_use_allowed=bool(row["model_use_allowed"]),
+        source_version_id=row["source_version_id"],
+        content_hash=row["content_hash"],
+        category=str(provenance.get("category") or "official"),
+        locator=_json_object(row.get("locator_json")),
+        retrieved_at=_iso_timestamp(row["retrieved_at"]),
+        last_checked_at=_iso_timestamp(row["last_checked_at"]),
+        effective_from=_optional_iso_timestamp(row["effective_from"]),
+        effective_to=_optional_iso_timestamp(row["effective_to"]),
+        citation=row["citation"],
+        title=row["title"],
+        text=row["text"],
+        score=score,
+        match_types=match_types,
+    )
 
 
 def _iso_timestamp(value: object) -> str:
@@ -569,3 +618,13 @@ def _iso_timestamp(value: object) -> str:
 
 def _optional_iso_timestamp(value: object) -> str | None:
     return None if value is None else _iso_timestamp(value)
+
+
+def _json_object(value: object) -> dict[str, object]:
+    if not isinstance(value, str):
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}

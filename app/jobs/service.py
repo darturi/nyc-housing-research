@@ -34,6 +34,8 @@ RESUMABLE_JOB_TYPES = {
     "corpus_update",
     "corpus_index",
     "property_complete_export",
+    "resource_add",
+    "resource_replace",
 }
 
 

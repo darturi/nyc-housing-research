@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.answer.local import LocalAnswerService
 from app.corpus.indexing import CorpusEmbeddingIndexer
+from app.corpus.resources import ResourceMetadata, ResourceService
 from app.corpus.service import CorpusService, CorpusValidationError, SourceArtifact
 from app.credentials.store import CredentialResolver
 from app.jobs.interactive import InteractiveAnswerJobs
@@ -18,6 +19,7 @@ from app.providers.profiles import (
     get_configured_profile,
     get_profile,
 )
+from app.retrieval.local import LocalSearchFilters
 from app.storage.database import LocalStorage
 from app.storage.schema import corpus_state, generations, usage_events
 from app.usage.ledger import UsageLedger
@@ -103,6 +105,42 @@ def test_indexing_estimate_is_read_only_and_reports_reuse(tmp_path) -> None:
         assert estimate.estimated_input_tokens > 0
         assert estimate.estimated_cost_usd == 0
         assert before == after
+    finally:
+        gateway.close()
+        storage.close()
+
+
+def test_resource_model_consent_controls_answer_and_index_eligibility(tmp_path) -> None:
+    context, storage, credentials = _workspace(tmp_path)
+    resource = ResourceService(storage).add(
+        b"A private repair log records a distinctive purple radiator.",
+        filename="repair-log.txt",
+        metadata=ResourceMetadata(title="Private repair log"),
+    )
+    gateway = ProviderGateway(context, UsageLedger(storage))
+    filters = LocalSearchFilters(source_slug=resource.slug, origin="user")
+    try:
+        estimate = CorpusEmbeddingIndexer(storage, gateway).estimate_active(
+            get_profile("fake-small-16")
+        )
+        assert estimate.total_chunks == 1  # The official RPAPL fixture only.
+        blocked = LocalAnswerService(
+            context, storage, gateway, credentials
+        ).answer("What color was the radiator?", filters=filters)
+        assert blocked.status == "model_use_disabled"
+        assert blocked.evidence == ()
+        assert blocked.model_excluded_source_count == 1
+
+        ResourceService(storage).set_model_use(resource.resource_id, True)
+        allowed_estimate = CorpusEmbeddingIndexer(storage, gateway).estimate_active(
+            get_profile("fake-small-16")
+        )
+        assert allowed_estimate.total_chunks == 2
+        allowed = LocalAnswerService(
+            context, storage, gateway, credentials
+        ).answer("What color was the radiator?", filters=filters)
+        assert allowed.status == "synthetic_demo"
+        assert allowed.evidence[0].origin == "user"
     finally:
         gateway.close()
         storage.close()
@@ -276,7 +314,10 @@ def test_query_embedding_failure_falls_back_to_keyword_evidence(
     client = httpx.Client(transport=httpx.MockTransport(handler))
     gateway = ProviderGateway(context, UsageLedger(storage), client=client)
     service = LocalAnswerService(context, storage, gateway, credentials)
-    monkeypatch.setattr(service, "_semantic_ready", lambda _profile: True)
+    monkeypatch.setattr(
+        service, "_semantic_ready", lambda _profile, _generation: True
+    )
+    monkeypatch.setattr(service, "_scope_has_ready_vectors", lambda *_args: True)
     try:
         result = service.answer("What does RPAPL section 711 concern?")
         assert result.status == "synthetic_demo"

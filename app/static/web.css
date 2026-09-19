@@ -853,10 +853,49 @@ dd {
 
 .local-app .research-controls {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) 120px;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 0.7fr) 120px;
   align-items: end;
   min-width: 0;
   gap: 12px;
+}
+
+.local-app .user-resources-panel {
+  margin-top: 18px;
+}
+
+.local-app .resource-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  margin: 18px 0 22px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--local-line);
+}
+
+.local-app .resource-file-field,
+.local-app .resource-consent {
+  grid-column: span 2;
+}
+
+.local-app .resource-actions {
+  margin-top: 12px;
+}
+
+.local-app .resource-actions a {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .local-app .resource-form {
+    grid-template-columns: 1fr;
+  }
+
+  .local-app .resource-file-field,
+  .local-app .resource-consent {
+    grid-column: auto;
+  }
 }
 
 .local-app #research-form {

@@ -13,9 +13,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
+from starlette.datastructures import FormData, UploadFile
 
 from app import __version__
-from app.corpus.service import CorpusService
+from app.corpus.resource_parsers import MAX_RESOURCE_BYTES
+from app.corpus.resources import ResourceMetadata, ResourceService
+from app.corpus.service import CorpusService, CorpusValidationError
 from app.credentials.store import (
     CredentialResolver,
     CredentialStoreError,
@@ -36,6 +39,7 @@ from app.jobs.interactive import InteractiveAnswerJobs
 from app.jobs.maintenance import CorpusMaintenanceJobs, job_payload
 from app.jobs.mutations import run_corpus_mutation
 from app.jobs.property_exports import PropertyExportJobs
+from app.jobs.resources import ResourceJobs, run_resource_mutation
 from app.jobs.runtime import Deadline, OperationDeadlineExceeded
 from app.jobs.service import (
     InvalidJobTransition,
@@ -83,6 +87,7 @@ DEMO_RESULTS = [
         ),
     }
 ]
+MAX_RESOURCE_REQUEST_BYTES = MAX_RESOURCE_BYTES + 1024 * 1024
 
 
 def create_local_app(
@@ -91,6 +96,7 @@ def create_local_app(
     if not context.initialized:
         raise ValueError("The local browser app requires an initialized workspace.")
     storage = LocalStorage.open(context.paths)
+    storage.assert_compatible()
     sessions = LocalSessionService(storage)
     launch_token = sessions.begin_process()
     interactive_jobs = InteractiveAnswerJobs(context, storage)
@@ -100,6 +106,7 @@ def create_local_app(
         storage,
         connector_factory=property_connector_factory,
     )
+    resource_jobs = ResourceJobs(context, storage)
     diagnostic_log = LocalDiagnosticLog(context.paths.logs)
     diagnostic_log.record("application_started", version=__version__)
 
@@ -111,6 +118,7 @@ def create_local_app(
             interactive_jobs.close()
             maintenance_jobs.close()
             property_export_jobs.close()
+            resource_jobs.close()
             storage.close()
 
     app = FastAPI(
@@ -168,6 +176,21 @@ def create_local_app(
                     reason="session",
                 )
                 return _security_error("Local session authentication required.", 401)
+        if (
+            changing
+            and request.url.path.startswith("/api/v1/resources")
+            and request.headers.get("content-type", "").startswith(
+                "multipart/form-data"
+            )
+        ):
+            too_large = await _read_bounded_body(
+                request, MAX_RESOURCE_REQUEST_BYTES
+            )
+            if too_large:
+                return JSONResponse(
+                    {"error": "Resource upload exceeds the 25 MiB limit."},
+                    status_code=413,
+                )
         try:
             response = await call_next(request)
         except Exception as exc:
@@ -260,6 +283,7 @@ def create_local_app(
     def source_status() -> JSONResponse:
         service = CorpusService(storage)
         status = service.status()
+        resources = ResourceService(storage).list()
         return JSONResponse(
             {
                 "active_generation_id": status.active_generation_id,
@@ -268,8 +292,218 @@ def create_local_app(
                 "chunk_count": status.chunk_count,
                 "embedding_ready_count": status.embedding_ready_count,
                 "sources": service.source_statuses(),
+                "resources": resources,
+                "resource_count": len(resources),
+                "active_resource_count": sum(
+                    bool(item["active"]) for item in resources
+                ),
             }
         )
+
+    @app.get("/api/v1/resources")
+    def list_resources(include_removed: bool = True) -> JSONResponse:
+        return JSONResponse(
+            {
+                "resources": ResourceService(storage).list(
+                    include_removed=include_removed
+                )
+            }
+        )
+
+    @app.post("/api/v1/resources")
+    async def add_resource(request: Request) -> JSONResponse:
+        try:
+            form = await request.form(
+                max_files=1,
+                max_fields=12,
+                max_part_size=MAX_RESOURCE_REQUEST_BYTES,
+            )
+            upload = _form_upload(form)
+            metadata = _resource_metadata_from_form(form, upload.filename)
+            content = await upload.read(MAX_RESOURCE_BYTES + 1)
+            await upload.close()
+            if len(content) > MAX_RESOURCE_BYTES:
+                return JSONResponse(
+                    {"error": "Resource upload exceeds the 25 MiB limit."},
+                    status_code=413,
+                )
+            job = resource_jobs.submit_add(
+                content,
+                filename=upload.filename or "resource",
+                content_type=upload.content_type,
+                metadata=metadata,
+            )
+        except JobConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except (CorpusValidationError, KeyError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(job_payload(job), status_code=202)
+
+    @app.get("/api/v1/resources/{resource_id}")
+    def get_resource(resource_id: str) -> JSONResponse:
+        try:
+            service = ResourceService(storage)
+            resource = service.get(resource_id)
+            resource["preview"] = service.preview_chunks(resource_id)
+            return JSONResponse(resource)
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.post("/api/v1/resources/{resource_id}/versions")
+    async def replace_resource(resource_id: str, request: Request) -> JSONResponse:
+        try:
+            form = await request.form(
+                max_files=1,
+                max_fields=12,
+                max_part_size=MAX_RESOURCE_REQUEST_BYTES,
+            )
+            upload = _form_upload(form)
+            current = ResourceService(storage).get(resource_id)
+            metadata = _resource_metadata_from_form(
+                form,
+                upload.filename,
+                fallback=current,
+            )
+            content = await upload.read(MAX_RESOURCE_BYTES + 1)
+            await upload.close()
+            if len(content) > MAX_RESOURCE_BYTES:
+                return JSONResponse(
+                    {"error": "Resource upload exceeds the 25 MiB limit."},
+                    status_code=413,
+                )
+            job = resource_jobs.submit_replace(
+                resource_id,
+                content,
+                filename=upload.filename or "resource",
+                content_type=upload.content_type,
+                metadata=metadata,
+                expected_version_id=_form_optional(form, "expected_version_id"),
+            )
+        except JobConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except (KeyError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(job_payload(job), status_code=202)
+
+    @app.patch("/api/v1/resources/{resource_id}")
+    async def edit_resource(resource_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "title",
+                "publisher",
+                "category",
+                "jurisdiction",
+                "original_url",
+                "expected_version_id",
+            }:
+                raise ValueError("Resource update contains unsupported fields.")
+            service = ResourceService(storage)
+            current = service.get(resource_id)
+            metadata = _resource_metadata_from_payload(payload, current)
+            job, result = run_resource_mutation(
+                storage,
+                "resource_edit",
+                lambda operation_id: service.edit_metadata(
+                    resource_id,
+                    metadata,
+                    expected_version_id=(
+                        str(payload["expected_version_id"])
+                        if payload.get("expected_version_id")
+                        else None
+                    ),
+                    operation_id=operation_id,
+                ),
+            )
+            return JSONResponse(
+                {"job": job_payload(job), "result": result.as_dict()}
+            )
+        except JobConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except (AttributeError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/v1/resources/{resource_id}/remove")
+    def remove_resource(resource_id: str) -> JSONResponse:
+        return _resource_mutation_response(
+            storage,
+            "resource_remove",
+            lambda service, operation_id: service.remove(
+                resource_id, operation_id=operation_id
+            ),
+        )
+
+    @app.post("/api/v1/resources/{resource_id}/restore")
+    async def restore_resource(resource_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            version_id = (
+                str(payload["version_id"])
+                if isinstance(payload, dict) and payload.get("version_id")
+                else None
+            )
+        except (AttributeError, TypeError, ValueError):
+            return JSONResponse({"error": "Invalid restore request."}, status_code=400)
+        return _resource_mutation_response(
+            storage,
+            "resource_restore",
+            lambda service, operation_id: service.restore(
+                resource_id,
+                version_id=version_id,
+                operation_id=operation_id,
+            ),
+        )
+
+    @app.post("/api/v1/resources/{resource_id}/model-use")
+    async def resource_model_use(resource_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("allowed"), bool
+            ):
+                raise ValueError("allowed must be true or false.")
+        except (AttributeError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return _resource_mutation_response(
+            storage,
+            "resource_model_use",
+            lambda service, operation_id: service.set_model_use(
+                resource_id,
+                payload["allowed"],
+                operation_id=operation_id,
+            ),
+        )
+
+    @app.get(
+        "/api/v1/resources/{resource_id}/versions/{version_id}/chunks/{chunk_id}"
+    )
+    def resource_excerpt(
+        resource_id: str, version_id: str, chunk_id: str
+    ) -> JSONResponse:
+        try:
+            return JSONResponse(
+                ResourceService(storage).chunk(resource_id, version_id, chunk_id)
+            )
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.get("/api/v1/resources/{resource_id}/versions/{version_id}/download")
+    def download_resource(resource_id: str, version_id: str):
+        try:
+            service = ResourceService(storage)
+            path = service.original_path(resource_id, version_id)
+            provenance = service.version(resource_id, version_id)["provenance"]
+            filename = str(provenance.get("original_basename") or "resource")
+            media_type = str(
+                provenance.get("media_type") or "application/octet-stream"
+            )
+            return FileResponse(path, filename=filename, media_type=media_type)
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
 
     @app.get("/api/v1/settings")
     def settings_status() -> JSONResponse:
@@ -471,9 +705,11 @@ def create_local_app(
         source: str | None = None,
         source_type: str | None = None,
         jurisdiction: str | None = None,
+        scope: str = "core",
         limit: int = 10,
     ) -> JSONResponse:
         try:
+            origin = _scope_origin(scope)
             corpus = CorpusService(storage).status()
             result = LocalSearch(storage).search(
                 q,
@@ -481,6 +717,7 @@ def create_local_app(
                     source_slug=source,
                     source_type=source_type,
                     jurisdiction=jurisdiction,
+                    origin=origin,
                 ),
                 limit=limit,
             )
@@ -504,6 +741,7 @@ def create_local_app(
                     "is_partial": corpus.is_partial,
                     "source_count": corpus.source_count,
                     "source_filter": source,
+                    "scope": scope,
                 },
                 "warnings": warnings,
                 "provenance": {
@@ -516,8 +754,19 @@ def create_local_app(
                         "source_slug": item.source_slug,
                         "source_name": item.source_name,
                         "source_type": item.source_type,
+                        "origin": item.origin,
+                        "category": item.category,
+                        "model_use_allowed": item.model_use_allowed,
+                        "source_version_id": item.source_version_id,
+                        "content_hash": item.content_hash,
+                        "locator": item.locator,
                         "jurisdiction": item.jurisdiction,
                         "source_url": item.source_url,
+                        "publisher": item.publisher,
+                        "retrieved_at": item.retrieved_at,
+                        "last_checked_at": item.last_checked_at,
+                        "effective_from": item.effective_from,
+                        "effective_to": item.effective_to,
                         "citation": item.citation,
                         "title": item.title,
                         "text": item.text,
@@ -539,6 +788,7 @@ def create_local_app(
                 "source",
                 "source_type",
                 "jurisdiction",
+                "scope",
                 "limit",
             }:
                 raise ValueError("Search request contains unsupported fields.")
@@ -551,6 +801,7 @@ def create_local_app(
             source=payload.get("source"),
             source_type=payload.get("source_type"),
             jurisdiction=payload.get("jurisdiction"),
+            scope=str(payload.get("scope", "core")),
             limit=limit,
         )
 
@@ -561,6 +812,7 @@ def create_local_app(
             if not isinstance(payload, dict) or not set(payload) <= {
                 "question",
                 "source",
+                "scope",
                 "limit",
                 "allow_unknown_cost",
             }:
@@ -570,12 +822,16 @@ def create_local_app(
             ):
                 raise ValueError("allow_unknown_cost must be true or false.")
             question = str(payload.get("question", ""))
+            scope = str(payload.get("scope", "core"))
+            origin = _scope_origin(scope)
             limit = int(payload.get("limit", 8))
             if not question.strip() or len(question) > 4_000 or not 1 <= limit <= 20:
                 raise ValueError("Question or result limit is invalid.")
             job_id = interactive_jobs.submit(
                 question,
-                filters=LocalSearchFilters(source_slug=payload.get("source")),
+                filters=LocalSearchFilters(
+                    source_slug=payload.get("source"), origin=origin
+                ),
                 limit=limit,
                 allow_unknown_cost=payload.get("allow_unknown_cost") is True,
             )
@@ -601,6 +857,7 @@ def create_local_app(
                     "is_partial": corpus.is_partial,
                     "source_count": corpus.source_count,
                     "source_filter": payload.get("source"),
+                    "scope": scope,
                 },
                 "warnings": warnings,
                 "provenance": {
@@ -822,11 +1079,12 @@ def create_local_app(
     def cancel_answer_job(job_id: str) -> JSONResponse:
         try:
             job = maintenance_jobs.get(job_id)
-            payload = (
-                interactive_jobs.cancel(job_id)
-                if job.job_type == "answer"
-                else job_payload(maintenance_jobs.cancel(job_id))
-            )
+            if job.job_type == "answer":
+                payload = interactive_jobs.cancel(job_id)
+            elif job.job_type.startswith("resource_"):
+                payload = job_payload(resource_jobs.cancel(job_id))
+            else:
+                payload = job_payload(maintenance_jobs.cancel(job_id))
         except (JobNotFound, RuntimeError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse(payload)
@@ -838,6 +1096,8 @@ def create_local_app(
             resumed = (
                 property_export_jobs.resume(job_id)
                 if existing.job_type == "property_complete_export"
+                else resource_jobs.resume(job_id)
+                if existing.job_type in {"resource_add", "resource_replace"}
                 else maintenance_jobs.resume(job_id)
             )
             payload = job_payload(resumed)
@@ -1256,6 +1516,123 @@ def _same_origin(request: Request) -> bool:
         and parsed.hostname == request.url.hostname
         and origin_port == request_port
     )
+
+
+async def _read_bounded_body(request: Request, limit: int) -> bool:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > limit:
+                return True
+        except ValueError:
+            pass
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > limit:
+            return True
+    request._body = bytes(body)  # noqa: SLF001 - Starlette's cached request body.
+    return False
+
+
+def _form_upload(form: FormData) -> UploadFile:
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile):
+        raise ValueError("A PDF, Markdown, or UTF-8 text file is required.")
+    return upload
+
+
+def _form_optional(form: FormData, name: str) -> str | None:
+    value = form.get(name)
+    if value is None or isinstance(value, UploadFile):
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _resource_metadata_from_form(
+    form: FormData,
+    filename: str | None,
+    *,
+    fallback: dict[str, object] | None = None,
+) -> ResourceMetadata:
+    prior = fallback or {}
+    provenance = prior.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+
+    def selected(name: str, default: str = "") -> str:
+        supplied = _form_optional(form, name)
+        if supplied is not None:
+            return supplied
+        return str(provenance.get(name) or default)
+
+    title_default = str(
+        provenance.get("title")
+        or prior.get("name")
+        or Path(filename or "resource").stem
+    )
+    allowed_value = _form_optional(form, "model_use_allowed")
+    model_use_allowed = (
+        allowed_value.lower() in {"1", "true", "yes", "on"}
+        if allowed_value is not None
+        else bool(prior.get("model_use_allowed", False))
+    )
+    return ResourceMetadata(
+        title=selected("title", title_default),
+        publisher=selected("publisher"),
+        category=selected("category", "reference"),
+        jurisdiction=selected("jurisdiction"),
+        original_url=selected("original_url") or None,
+        model_use_allowed=model_use_allowed,
+    )
+
+
+def _resource_metadata_from_payload(
+    payload: dict[str, object], current: dict[str, object]
+) -> ResourceMetadata:
+    provenance = current.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+
+    def selected(name: str, default: str = "") -> str:
+        value = payload.get(name, provenance.get(name, default))
+        return str(value or "")
+
+    return ResourceMetadata(
+        title=selected("title", str(current.get("name") or "Resource")),
+        publisher=selected("publisher"),
+        category=selected("category", "reference"),
+        jurisdiction=selected("jurisdiction"),
+        original_url=selected("original_url") or None,
+        model_use_allowed=bool(current.get("model_use_allowed", False)),
+    )
+
+
+def _resource_mutation_response(storage, job_type: str, operation) -> JSONResponse:
+    service = ResourceService(storage)
+    try:
+        job, result = run_resource_mutation(
+            storage,
+            job_type,
+            lambda operation_id: operation(service, operation_id),
+        )
+    except JobConflict as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    except CorpusValidationError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    return JSONResponse({"job": job_payload(job), "result": result.as_dict()})
+
+
+def _scope_origin(scope: str) -> str | None:
+    normalized = scope.strip().lower()
+    if normalized in {"core", "official"}:
+        return "core"
+    if normalized in {"user", "mine"}:
+        return "user"
+    if normalized == "all":
+        return None
+    raise ValueError("Scope must be core, user, or all.")
 
 
 def _security_error(message: str, status_code: int) -> JSONResponse:

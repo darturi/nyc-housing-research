@@ -22,6 +22,7 @@ from app.storage.schema import (
     generation_chunks,
     generation_sources,
     generations,
+    source_modules,
 )
 
 
@@ -65,9 +66,15 @@ class CorpusEmbeddingIndexer:
                     .select_from(
                         generation_chunks.join(
                             chunks, chunks.c.id == generation_chunks.c.chunk_id
+                        ).join(
+                            source_modules,
+                            source_modules.c.id == chunks.c.source_module_id,
                         )
                     )
-                    .where(generation_chunks.c.generation_id == active)
+                    .where(
+                        generation_chunks.c.generation_id == active,
+                        source_modules.c.model_use_allowed.is_(True),
+                    )
                 ).mappings()
             )
             reusable = set(
@@ -164,23 +171,54 @@ class CorpusEmbeddingIndexer:
         with self._storage.corpus_engine.begin() as connection:
             total = connection.scalar(
                 select(func.count())
-                .select_from(generation_chunks)
-                .where(generation_chunks.c.generation_id == staged)
+                .select_from(
+                    generation_chunks.join(
+                        chunks, chunks.c.id == generation_chunks.c.chunk_id
+                    ).join(
+                        source_modules,
+                        source_modules.c.id == chunks.c.source_module_id,
+                    )
+                )
+                .where(
+                    generation_chunks.c.generation_id == staged,
+                    source_modules.c.model_use_allowed.is_(True),
+                )
             )
             ready = connection.scalar(
                 select(func.count())
-                .select_from(generation_chunks)
+                .select_from(
+                    generation_chunks.join(
+                        chunks, chunks.c.id == generation_chunks.c.chunk_id
+                    ).join(
+                        source_modules,
+                        source_modules.c.id == chunks.c.source_module_id,
+                    )
+                )
                 .where(
                     generation_chunks.c.generation_id == staged,
                     generation_chunks.c.embedding_ready.is_(True),
+                    source_modules.c.model_use_allowed.is_(True),
                 )
             )
             if total != ready:
                 raise CorpusValidationError("Embedding coverage is incomplete.")
+            is_partial = bool(
+                connection.scalar(
+                    select(generations.c.is_partial).where(generations.c.id == staged)
+                )
+            )
             connection.execute(
                 update(generations)
                 .where(generations.c.id == staged)
-                .values(readiness="hybrid_ready")
+                .values(
+                    readiness=(
+                        "hybrid_ready"
+                        if total
+                        else "partial_text_ready"
+                        if is_partial
+                        else "text_ready"
+                    )
+                )
             )
             CorpusService(self._storage)._activate_in_transaction(
                 connection, staged, datetime.now(UTC)
@@ -211,18 +249,28 @@ class CorpusEmbeddingIndexer:
                     )
                 )
             )
-            chunk_rows = [
+            all_chunk_rows = [
                 dict(row)
                 for row in connection.execute(
-                    select(chunks.c.id, chunks.c.text)
+                    select(
+                        chunks.c.id,
+                        chunks.c.text,
+                        source_modules.c.model_use_allowed,
+                    )
                     .select_from(
                         generation_chunks.join(
                             chunks, chunks.c.id == generation_chunks.c.chunk_id
+                        ).join(
+                            source_modules,
+                            source_modules.c.id == chunks.c.source_module_id,
                         )
                     )
                     .where(generation_chunks.c.generation_id == active)
                     .order_by(chunks.c.id)
                 ).mappings()
+            ]
+            chunk_rows = [
+                row for row in all_chunk_rows if bool(row["model_use_allowed"])
             ]
             ready_ids = set(
                 connection.scalars(
@@ -255,7 +303,7 @@ class CorpusEmbeddingIndexer:
                         for source_id in source_ids
                     ],
                 )
-            if chunk_rows:
+            if all_chunk_rows:
                 connection.execute(
                     insert(generation_chunks),
                     [
@@ -263,9 +311,12 @@ class CorpusEmbeddingIndexer:
                             "generation_id": staged,
                             "chunk_id": row["id"],
                             "text_ready": True,
-                            "embedding_ready": row["id"] in ready_ids,
+                            "embedding_ready": (
+                                bool(row["model_use_allowed"])
+                                and row["id"] in ready_ids
+                            ),
                         }
-                        for row in chunk_rows
+                        for row in all_chunk_rows
                     ],
                 )
             CorpusService(self._storage)._build_fts(connection, staged)

@@ -16,6 +16,8 @@ from sqlalchemy import select, update
 
 from app.storage.database import LocalStorage
 from app.storage.schema import (
+    CORPUS_SCHEMA_VERSION,
+    STATE_SCHEMA_VERSION,
     jobs,
     maintenance_state,
     property_cache,
@@ -178,15 +180,6 @@ def restore_backup(archive: Path, destination: Path) -> BackupSummary:
             "local-" + hashlib.sha256(str(destination).encode()).hexdigest()[:20]
         )
         (stage / "settings.json").write_bytes(_json_bytes(settings))
-        (stage / "workspace.json").write_bytes(
-            _json_bytes(
-                {
-                    "format_version": 1,
-                    "corpus_schema_version": 1,
-                    "state_schema_version": 1,
-                }
-            )
-        )
         for relative, member in manifest["artifact_map"].items():
             target = (stage / relative).resolve()
             try:
@@ -200,10 +193,23 @@ def restore_backup(archive: Path, destination: Path) -> BackupSummary:
         )
         storage = LocalStorage.open(paths)
         try:
-            if storage.versions() != {"corpus": 1, "state": 1}:
+            versions = storage.versions()
+            if versions not in (
+                {"corpus": CORPUS_SCHEMA_VERSION, "state": STATE_SCHEMA_VERSION},
+                {"corpus": 1, "state": 1},
+            ):
                 raise BackupError("Backup schema versions are incompatible.")
         finally:
             storage.close()
+        (stage / "workspace.json").write_bytes(
+            _json_bytes(
+                {
+                    "format_version": 1,
+                    "corpus_schema_version": versions["corpus"],
+                    "state_schema_version": versions["state"],
+                }
+            )
+        )
         os.replace(stage, destination)
     except Exception:
         shutil.rmtree(stage, ignore_errors=True)

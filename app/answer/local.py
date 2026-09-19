@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import func, select
 
@@ -20,7 +20,9 @@ from app.providers.profiles import ProfileKind, get_configured_profile
 from app.retrieval.local import LocalSearch, LocalSearchFilters, LocalSearchResult
 from app.storage.database import LocalStorage
 from app.storage.schema import (
+    chunks,
     corpus_state,
+    embeddings,
     generation_chunks,
     generation_sources,
     generations,
@@ -52,8 +54,13 @@ class LocalAnswerEvidence:
     citation: str | None
     title: str | None
     source_name: str
-    source_url: str
+    source_url: str | None
     publisher: str
+    origin: str
+    category: str
+    source_version_id: str
+    content_hash: str
+    locator: dict[str, object]
     retrieved_at: str
     last_checked_at: str
     effective_from: str | None
@@ -76,6 +83,7 @@ class LocalAnswerResult:
     prompt_version: str
     cost_usd: str | None
     cost_known: bool
+    model_excluded_source_count: int = 0
     disclaimer: str = LEGAL_INFORMATION_DISCLAIMER
     error: str | None = None
 
@@ -113,13 +121,24 @@ class LocalAnswerService:
         if cancellation:
             cancellation.raise_if_cancelled()
         operation_id = operation_id or str(uuid.uuid4())
+        requested_filters = filters or LocalSearchFilters(origin="core")
+        generation_id = self._active_generation_id()
+        total_sources, eligible_sources = self._scope_source_counts(
+            generation_id, requested_filters
+        )
+        excluded_sources = max(0, total_sources - eligible_sources)
+        model_filters = replace(requested_filters, model_eligible_only=True)
         embedding_profile = get_configured_profile(
             self._context.settings, ProfileKind.EMBEDDING
         )
         query_vector = None
         profile_id = None
         semantic_failure: str | None = None
-        if self._semantic_ready(embedding_profile.id):
+        if self._semantic_ready(
+            embedding_profile.id, generation_id
+        ) and self._scope_has_ready_vectors(
+            embedding_profile.id, generation_id, model_filters
+        ):
             profile_id = embedding_profile.id
             try:
                 credential, _source = self._credentials.resolve(
@@ -144,10 +163,11 @@ class LocalAnswerService:
                 semantic_failure = str(exc)
         retrieval = LocalSearch(self._storage).search(
             question,
-            filters=filters,
+            filters=model_filters,
             limit=limit,
             query_vector=query_vector,
             embedding_profile_id=profile_id if query_vector is not None else None,
+            generation_id=generation_id,
         )
         semantic_status = (
             "fallback_embedding_failed"
@@ -161,13 +181,22 @@ class LocalAnswerService:
             self._context.settings, ProfileKind.ANSWER
         )
         if not evidence:
+            model_use_disabled = total_sources > 0 and eligible_sources == 0
             return LocalAnswerResult(
                 question=question,
                 operation_id=operation_id,
-                status="insufficient_coverage",
+                status=(
+                    "model_use_disabled"
+                    if model_use_disabled
+                    else "insufficient_coverage"
+                ),
                 answer=(
-                    "The installed corpus did not return enough public-source "
-                    "material to answer this question."
+                    "The selected resource is available for local search, but its "
+                    "model-use setting is off. Enable model use for that resource "
+                    "before requesting an answer."
+                    if model_use_disabled
+                    else "The selected sources did not return enough material to "
+                    "answer this question."
                 ),
                 evidence=(),
                 generation_id=retrieval.generation_id,
@@ -178,6 +207,7 @@ class LocalAnswerService:
                 prompt_version=LOCAL_ANSWER_PROMPT_VERSION,
                 cost_usd="0",
                 cost_known=True,
+                model_excluded_source_count=excluded_sources,
             )
         if _historical_coverage_unavailable(question, evidence):
             return LocalAnswerResult(
@@ -199,11 +229,13 @@ class LocalAnswerService:
                 prompt_version=LOCAL_ANSWER_PROMPT_VERSION,
                 cost_usd="0",
                 cost_known=True,
+                model_excluded_source_count=excluded_sources,
             )
         prompt = _prompt(
             question,
             evidence,
-            self._coverage_description(retrieval.generation_id),
+            self._coverage_description(retrieval.generation_id, model_filters),
+            excluded_sources=excluded_sources,
         )
         try:
             credential, _source = self._credentials.resolve(
@@ -250,6 +282,7 @@ class LocalAnswerService:
                     allow_unknown_cost and not answer_profile.pricing_verified
                 ),
                 error=str(exc),
+                model_excluded_source_count=excluded_sources,
             )
         cited = _cited_evidence(response.text, evidence)
         status = "synthetic_demo" if answer_profile.provider == "fake" else "answered"
@@ -282,43 +315,105 @@ class LocalAnswerService:
             semantic_status=semantic_status,
             prompt_version=LOCAL_ANSWER_PROMPT_VERSION,
             cost_usd=(
-                str(response.cost_usd)
-                if response.cost_usd is not None
-                else None
+                str(response.cost_usd) if response.cost_usd is not None else None
             ),
             cost_known=response.cost_known,
+            model_excluded_source_count=excluded_sources,
         )
 
-    def _semantic_ready(self, profile_id: str) -> bool:
+    def _active_generation_id(self) -> str:
         with self._storage.corpus_engine.connect() as connection:
-            active = connection.scalar(
+            generation_id = connection.scalar(
                 select(corpus_state.c.active_generation_id).where(
                     corpus_state.c.id == 1
                 )
             )
-            if active is None:
-                return False
+        if generation_id is None:
+            raise ValueError("No active legal corpus is installed.")
+        return generation_id
+
+    def _semantic_ready(self, profile_id: str, generation_id: str) -> bool:
+        with self._storage.corpus_engine.connect() as connection:
             generation_profile = connection.scalar(
-                select(generations.c.profile_id).where(generations.c.id == active)
+                select(generations.c.profile_id).where(
+                    generations.c.id == generation_id
+                )
+            )
+            return generation_profile == profile_id
+
+    def _scope_has_ready_vectors(
+        self,
+        profile_id: str,
+        generation_id: str,
+        filters: LocalSearchFilters,
+    ) -> bool:
+        with self._storage.corpus_engine.connect() as connection:
+            generation_profile = connection.scalar(
+                select(generations.c.profile_id).where(
+                    generations.c.id == generation_id
+                )
             )
             if generation_profile != profile_id:
                 return False
-            total = connection.scalar(
-                select(func.count())
-                .select_from(generation_chunks)
-                .where(generation_chunks.c.generation_id == active)
-            )
             ready = connection.scalar(
                 select(func.count())
-                .select_from(generation_chunks)
+                .select_from(
+                    generation_chunks.join(
+                        chunks, chunks.c.id == generation_chunks.c.chunk_id
+                    )
+                    .join(
+                        embeddings,
+                        embeddings.c.chunk_id == chunks.c.id,
+                    )
+                    .join(
+                        source_modules,
+                        source_modules.c.id == chunks.c.source_module_id,
+                    )
+                )
                 .where(
-                    generation_chunks.c.generation_id == active,
-                    generation_chunks.c.embedding_ready.is_(True),
+                    generation_chunks.c.generation_id == generation_id,
+                    embeddings.c.profile_id == profile_id,
+                    *_scope_conditions(filters),
                 )
             )
-            return bool(total and total == ready)
+            return bool(ready)
 
-    def _coverage_description(self, generation_id: str) -> str:
+    def _scope_source_counts(
+        self, generation_id: str, filters: LocalSearchFilters
+    ) -> tuple[int, int]:
+        with self._storage.corpus_engine.connect() as connection:
+            joined = generation_sources.join(
+                source_versions,
+                source_versions.c.id == generation_sources.c.source_version_id,
+            ).join(
+                source_modules,
+                source_modules.c.id == source_versions.c.source_module_id,
+            )
+            base = [
+                generation_sources.c.generation_id == generation_id,
+                *_scope_conditions(filters, include_model_policy=False),
+            ]
+            total = int(
+                connection.scalar(
+                    select(func.count(func.distinct(source_modules.c.id)))
+                    .select_from(joined)
+                    .where(*base)
+                )
+                or 0
+            )
+            eligible = int(
+                connection.scalar(
+                    select(func.count(func.distinct(source_modules.c.id)))
+                    .select_from(joined)
+                    .where(*base, source_modules.c.model_use_allowed.is_(True))
+                )
+                or 0
+            )
+        return total, eligible
+
+    def _coverage_description(
+        self, generation_id: str, filters: LocalSearchFilters
+    ) -> str:
         with self._storage.corpus_engine.connect() as connection:
             names = list(
                 connection.scalars(
@@ -333,11 +428,14 @@ class LocalAnswerService:
                             source_modules.c.id == source_versions.c.source_module_id,
                         )
                     )
-                    .where(generation_sources.c.generation_id == generation_id)
+                    .where(
+                        generation_sources.c.generation_id == generation_id,
+                        *_scope_conditions(filters),
+                    )
                     .order_by(source_modules.c.name)
                 )
             )
-        return "Installed public sources: " + ", ".join(names)
+        return "Selected evidence sources: " + ", ".join(names)
 
 
 def _evidence(
@@ -360,6 +458,11 @@ def _evidence(
                 source_name=result.source_name,
                 source_url=result.source_url,
                 publisher=result.publisher,
+                origin=result.origin,
+                category=result.category,
+                source_version_id=result.source_version_id,
+                content_hash=result.content_hash,
+                locator=result.locator,
                 retrieved_at=result.retrieved_at,
                 last_checked_at=result.last_checked_at,
                 effective_from=result.effective_from,
@@ -374,6 +477,8 @@ def _prompt(
     question: str,
     evidence: tuple[LocalAnswerEvidence, ...],
     coverage: str,
+    *,
+    excluded_sources: int = 0,
 ) -> str:
     blocks = []
     for item in evidence:
@@ -384,6 +489,9 @@ def _prompt(
                     f"Citation: {item.citation or 'No formal citation'}",
                     f"Source: {item.source_name}",
                     f"Publisher: {item.publisher}",
+                    f"Origin: {_origin_label(item.origin)}",
+                    f"Category: {item.category}",
+                    f"Document locator: {_locator_label(item.locator)}",
                     f"Retrieved: {item.retrieved_at}",
                     f"Last checked: {item.last_checked_at}",
                     f"Effective from: {item.effective_from or 'not supplied'}",
@@ -406,10 +514,48 @@ def _prompt(
             safety,
             f"Question: {question}",
             f"Coverage: {coverage}",
+            (
+                f"Model-use policy excluded {excluded_sources} selected source(s)."
+                if excluded_sources
+                else "Model-use policy excluded no selected sources."
+            ),
             f"Required disclaimer: {LEGAL_INFORMATION_DISCLAIMER}",
             "Evidence:\n" + "\n\n".join(blocks),
         ]
     )
+
+
+def _scope_conditions(
+    filters: LocalSearchFilters, *, include_model_policy: bool = True
+) -> list:
+    conditions = []
+    if filters.source_slug:
+        conditions.append(source_modules.c.slug == filters.source_slug)
+    if filters.source_type:
+        conditions.append(source_modules.c.source_type == filters.source_type)
+    if filters.jurisdiction:
+        conditions.append(source_modules.c.jurisdiction == filters.jurisdiction)
+    if filters.origin:
+        conditions.append(source_modules.c.origin == filters.origin)
+    if include_model_policy and filters.model_eligible_only:
+        conditions.append(source_modules.c.model_use_allowed.is_(True))
+    return conditions
+
+
+def _origin_label(origin: str) -> str:
+    return "User-provided" if origin == "user" else "Official source"
+
+
+def _locator_label(locator: dict[str, object]) -> str:
+    if locator.get("pdf_page"):
+        return f"PDF page {locator['pdf_page']}"
+    start = locator.get("paragraph_start")
+    end = locator.get("paragraph_end")
+    if start and end:
+        return f"paragraphs {start}-{end}" if start != end else f"paragraph {start}"
+    if locator.get("section"):
+        return str(locator["section"])
+    return "not supplied"
 
 
 def _cited_evidence(

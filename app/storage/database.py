@@ -103,6 +103,19 @@ class LocalStorage:
             "state": _read_schema_version(self.state_engine, state_schema_metadata),
         }
 
+    def assert_compatible(self) -> None:
+        versions = self.versions()
+        supported = {
+            "corpus": CORPUS_SCHEMA_VERSION,
+            "state": STATE_SCHEMA_VERSION,
+        }
+        if versions != supported:
+            raise SchemaVersionError(
+                "Local storage has incompatible schema versions "
+                f"{versions}; this application supports {supported}. "
+                "Run `nyc-housing migrate preflight` for the required action."
+            )
+
     def close(self) -> None:
         self.corpus_engine.dispose()
         self.state_engine.dispose()

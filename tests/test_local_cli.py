@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -32,7 +33,7 @@ def test_setup_and_status_are_idempotent_and_do_not_run_paid_work(
     assert first["status"] == "initialized"
     assert first["application_version"].startswith("0.1.0")
     assert "No paid request" in first["message"]
-    assert first["schema_versions"] == {"corpus": 1, "state": 1}
+    assert first["schema_versions"] == {"corpus": 2, "state": 1}
     assert (root / "corpus.sqlite3").is_file()
     assert (root / "state.sqlite3").is_file()
 
@@ -90,7 +91,7 @@ def test_migration_preflight_is_read_only_and_fails_closed_without_a_path(
         connection.execute(
             update(corpus_schema_metadata)
             .where(corpus_schema_metadata.c.key == "version")
-            .values(value="2")
+            .values(value="999")
         )
     storage.close()
 
@@ -102,6 +103,69 @@ def test_migration_preflight_is_read_only_and_fails_closed_without_a_path(
     assert incompatible["status"] == "migration_unavailable"
     assert incompatible["backup_required_before_migration"] is True
     assert incompatible["migration_available"] is False
+
+
+def test_supported_v1_migration_creates_backup_and_adds_resource_columns(
+    tmp_path, capsys
+) -> None:
+    root = tmp_path / "v1 workspace"
+    assert main(["--data-dir", str(root), "setup", "--json"]) == 0
+    capsys.readouterr()
+    corpus_path = root / "corpus.sqlite3"
+    corpus_path.unlink()
+    (root / "corpus.sqlite3-wal").unlink(missing_ok=True)
+    (root / "corpus.sqlite3-shm").unlink(missing_ok=True)
+    with sqlite3.connect(corpus_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO schema_metadata VALUES ('version', '1');
+            CREATE TABLE source_modules (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL, name TEXT NOT NULL,
+                source_type TEXT NOT NULL, publisher TEXT NOT NULL,
+                jurisdiction TEXT NOT NULL, source_url TEXT NOT NULL,
+                scope_json TEXT NOT NULL, manifest_json TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL
+            );
+            CREATE TABLE source_versions (
+                id TEXT PRIMARY KEY, source_module_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL, parser_version TEXT NOT NULL,
+                artifact_uri TEXT NOT NULL, retrieved_at DATETIME NOT NULL,
+                last_checked_at DATETIME NOT NULL, effective_from DATETIME,
+                effective_to DATETIME, validation_state TEXT NOT NULL,
+                validation_json TEXT NOT NULL
+            );
+            CREATE TABLE chunks (
+                id TEXT PRIMARY KEY, document_id TEXT NOT NULL,
+                source_module_id TEXT NOT NULL, source_version_id TEXT NOT NULL,
+                stable_id TEXT NOT NULL, citation TEXT, title TEXT,
+                text TEXT NOT NULL, text_hash TEXT NOT NULL
+            );
+            """
+        )
+
+    assert (
+        main(["--data-dir", str(root), "migrate", "preflight", "--json"])
+        == EXIT_INVALID_CONFIGURATION
+    )
+    preflight = json.loads(capsys.readouterr().out)
+    assert preflight["status"] == "migration_available"
+    assert preflight["migration_available"] is True
+
+    assert main(["--data-dir", str(root), "migrate", "apply", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "migrated"
+    assert result["to_corpus_version"] == 2
+    assert (root / "backups" / result["backup_path"].split("/")[-1]).is_file()
+    with sqlite3.connect(corpus_path) as connection:
+        module_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(source_modules)")
+        }
+        chunk_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(chunks)")
+        }
+    assert {"origin", "acquisition_kind", "model_use_allowed"} <= module_columns
+    assert "locator_json" in chunk_columns
 
 
 def test_setup_can_prompt_for_a_workspace_credential_without_echoing_it(

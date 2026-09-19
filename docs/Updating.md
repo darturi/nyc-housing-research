@@ -24,9 +24,11 @@ code and never changes the checkout.
 4. Fetch release metadata and inspect release/migration notes.
 5. Check out the selected signed/tagged release through your normal Git workflow.
 6. Run `uv sync --locked --extra credentials`.
-7. Run `nyc-housing migrate preflight` and `nyc-housing doctor` against the
-   workspace before serving. Preflight is read-only and stops when the selected
-   code has no reviewed migration path; it never edits schema metadata.
+7. Run `nyc-housing migrate preflight` against the workspace. Preflight is
+   read-only. If it reports `migration_available`, run
+   `nyc-housing migrate apply`; the command creates a workspace backup before
+   changing the schema. Then run `nyc-housing doctor` before serving. Stop when
+   preflight reports that no reviewed migration path is available.
 8. Start, verify status/source/search, and retain the old code reference and backup
    until the new version is confirmed.
 

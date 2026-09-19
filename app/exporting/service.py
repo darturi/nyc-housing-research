@@ -202,6 +202,16 @@ def _answer_markdown(payload: dict) -> str:
         else:
             lines.append(f"- **{label}** — {source}")
         lines.append(f"  - Evidence ID: `{item.get('chunk_id', 'unknown')}`")
+        lines.append(f"  - Origin: {item.get('origin', 'official')}")
+        lines.append(f"  - Category: {item.get('category', 'unknown')}")
+        lines.append(
+            f"  - Source version: `{item.get('source_version_id', 'unknown')}`"
+        )
+        lines.append(f"  - Content hash: `{item.get('content_hash', 'unknown')}`")
+        lines.append(
+            "  - Document locator: "
+            + json.dumps(item.get("locator") or {}, sort_keys=True)
+        )
         lines.append(f"  - Publisher: {item.get('publisher', 'unknown')}")
         lines.append(f"  - Retrieved: {item.get('retrieved_at', 'unknown')}")
         lines.append(f"  - Last checked: {item.get('last_checked_at', 'unknown')}")

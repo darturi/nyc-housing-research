@@ -22,6 +22,7 @@ from app.answer.evaluation import (
 from app.answer.local import LocalAnswerService
 from app.corpus.bundle import CanonicalBundleService
 from app.corpus.download import SourceDownloadError
+from app.corpus.resources import ResourceMetadata, ResourceService
 from app.corpus.service import CorpusService, CorpusValidationError, SourceArtifact
 from app.credentials.store import (
     CredentialResolver,
@@ -40,6 +41,7 @@ from app.hpd.connector import (
 from app.jobs.maintenance import CorpusMaintenanceJobs
 from app.jobs.mutations import run_corpus_mutation
 from app.jobs.property_exports import PropertyExportJobs
+from app.jobs.resources import ResourceJobs, run_resource_mutation
 from app.jobs.runtime import Deadline, OperationCancelled, OperationDeadlineExceeded
 from app.jobs.service import (
     InvalidJobTransition,
@@ -76,7 +78,7 @@ from app.retrieval.benchmark import benchmark_as_dict, run_synthetic_benchmark
 from app.retrieval.evaluation import evaluate_retrieval, load_retrieval_cases
 from app.retrieval.local import LocalSearch, LocalSearchFilters
 from app.storage.database import LocalStorage, SchemaVersionError
-from app.storage.schema import CORPUS_SCHEMA_VERSION, STATE_SCHEMA_VERSION
+from app.storage.migrations import migrate_workspace, migration_preflight
 from app.usage.ledger import PaidCapacityUnavailable, SpendDenied, UsageLedger
 from app.workspace.context import WorkspaceContext
 from app.workspace.network import NetworkAccessDenied, NetworkPolicy
@@ -277,8 +279,59 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--source")
     search.add_argument("--source-type")
     search.add_argument("--jurisdiction")
+    search.add_argument(
+        "--scope", choices=["official", "mine", "all"], default="official"
+    )
     search.add_argument("--limit", type=int, default=10)
     search.add_argument("--json", action="store_true")
+
+    resources = commands.add_parser(
+        "resources", help="Manage user-provided local research resources."
+    )
+    resource_commands = resources.add_subparsers(
+        dest="resources_command", required=True
+    )
+    resources_list = resource_commands.add_parser("list")
+    resources_list.add_argument("--active-only", action="store_true")
+    resources_list.add_argument("--json", action="store_true")
+    resources_show = resource_commands.add_parser("show")
+    resources_show.add_argument("resource_id")
+    resources_show.add_argument("--json", action="store_true")
+
+    def add_resource_metadata_options(command_parser, *, title_required: bool) -> None:
+        command_parser.add_argument("--title", required=title_required)
+        command_parser.add_argument("--publisher")
+        command_parser.add_argument("--category")
+        command_parser.add_argument("--jurisdiction")
+        command_parser.add_argument("--url")
+        command_parser.add_argument("--allow-model-use", action="store_true")
+
+    resources_add = resource_commands.add_parser("add")
+    resources_add.add_argument("path")
+    add_resource_metadata_options(resources_add, title_required=False)
+    resources_add.add_argument("--json", action="store_true")
+    resources_replace = resource_commands.add_parser("replace")
+    resources_replace.add_argument("resource_id")
+    resources_replace.add_argument("path")
+    resources_replace.add_argument("--expected-version")
+    add_resource_metadata_options(resources_replace, title_required=False)
+    resources_replace.add_argument("--json", action="store_true")
+    resources_edit = resource_commands.add_parser("edit")
+    resources_edit.add_argument("resource_id")
+    add_resource_metadata_options(resources_edit, title_required=False)
+    resources_edit.add_argument("--expected-version")
+    resources_edit.add_argument("--json", action="store_true")
+    resources_remove = resource_commands.add_parser("remove")
+    resources_remove.add_argument("resource_id")
+    resources_remove.add_argument("--json", action="store_true")
+    resources_restore = resource_commands.add_parser("restore")
+    resources_restore.add_argument("resource_id")
+    resources_restore.add_argument("--version")
+    resources_restore.add_argument("--json", action="store_true")
+    resources_model = resource_commands.add_parser("model-use")
+    resources_model.add_argument("resource_id")
+    resources_model.add_argument("permission", choices=["allow", "deny"])
+    resources_model.add_argument("--json", action="store_true")
 
     jobs_command = commands.add_parser("jobs", help="Inspect or control local jobs.")
     jobs_subcommands = jobs_command.add_subparsers(dest="jobs_command", required=True)
@@ -381,6 +434,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask.add_argument("question")
     ask.add_argument("--source")
+    ask.add_argument(
+        "--scope", choices=["official", "mine", "all"], default="official"
+    )
     ask.add_argument("--limit", type=int, default=8)
     ask.add_argument("--deadline", type=float)
     ask.add_argument("--allow-unknown-cost", action="store_true")
@@ -395,6 +451,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     debug_answer.add_argument("--question", required=True)
     debug_answer.add_argument("--source")
+    debug_answer.add_argument(
+        "--scope", choices=["official", "mine", "all"], default="official"
+    )
     debug_answer.add_argument("--limit", type=int, default=8)
     debug_answer.add_argument("--deadline", type=float)
     debug_answer.add_argument("--allow-unknown-cost", action="store_true")
@@ -500,6 +559,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check local schema compatibility without changing the workspace.",
     )
     migrate_preflight.add_argument("--json", action="store_true")
+    migrate_apply = migrate_commands.add_parser(
+        "apply", help="Back up and upgrade a supported older local schema."
+    )
+    migrate_apply.add_argument("--json", action="store_true")
     migrate_export = migrate_commands.add_parser(
         "export-legacy",
         help="Export current legal evidence from a legacy database.",
@@ -599,6 +662,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _corpus(context, args)
         if args.command == "search":
             return _search(context, args)
+        if args.command == "resources":
+            return _resources(context, args)
         if args.command == "jobs":
             return _jobs(context, args)
         if args.command == "credentials":
@@ -619,8 +684,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _restore(args)
         if args.command == "maintenance":
             return _maintenance(context, args)
-        if args.command == "migrate" and args.migrate_command == "preflight":
-            return _migration_preflight(context, args)
+        if args.command == "migrate":
+            if args.migrate_command == "preflight":
+                return _migration_preflight(context, args)
+            if args.migrate_command == "apply":
+                return _migration_apply(context, args)
         if args.command in {"legacy", "migrate"}:
             return _legacy(args)
         if args.command in {"evaluate", "evaluate-retrieval"}:
@@ -1254,6 +1322,7 @@ def _search(context: WorkspaceContext, args: argparse.Namespace) -> int:
                 source_slug=args.source,
                 source_type=args.source_type,
                 jurisdiction=args.jurisdiction,
+                origin=_origin_for_scope(args.scope),
             ),
             limit=args.limit,
         )
@@ -1267,6 +1336,143 @@ def _search(context: WorkspaceContext, args: argparse.Namespace) -> int:
         return 0
     finally:
         storage.close()
+
+
+def _resources(context: WorkspaceContext, args: argparse.Namespace) -> int:
+    storage = _initialized_storage(context)
+    service = ResourceService(storage)
+    try:
+        command = args.resources_command
+        if command == "list":
+            payload = {
+                "resources": service.list(include_removed=not args.active_only)
+            }
+        elif command == "show":
+            payload = service.get(args.resource_id)
+            payload["preview"] = service.preview_chunks(args.resource_id)
+        elif command == "add":
+            path = _resource_input_path(args.path)
+            metadata = _resource_metadata_from_args(args, filename=path.name)
+            job, result = run_resource_mutation(
+                storage,
+                "resource_add",
+                lambda operation_id: service.add(
+                    path.read_bytes(),
+                    filename=path.name,
+                    content_type=mimetypes.guess_type(path.name)[0],
+                    metadata=metadata,
+                    operation_id=operation_id,
+                ),
+            )
+            payload = {"job": _job_payload(job), "result": result.as_dict()}
+        elif command == "replace":
+            path = _resource_input_path(args.path)
+            current = service.get(args.resource_id)
+            metadata = _resource_metadata_from_args(
+                args, filename=path.name, current=current
+            )
+            job, result = run_resource_mutation(
+                storage,
+                "resource_replace",
+                lambda operation_id: service.replace_file(
+                    args.resource_id,
+                    path.read_bytes(),
+                    filename=path.name,
+                    content_type=mimetypes.guess_type(path.name)[0],
+                    metadata=metadata,
+                    expected_version_id=args.expected_version,
+                    operation_id=operation_id,
+                ),
+            )
+            payload = {"job": _job_payload(job), "result": result.as_dict()}
+        elif command == "edit":
+            current = service.get(args.resource_id)
+            metadata = _resource_metadata_from_args(args, current=current)
+            job, result = run_resource_mutation(
+                storage,
+                "resource_edit",
+                lambda operation_id: service.edit_metadata(
+                    args.resource_id,
+                    metadata,
+                    expected_version_id=args.expected_version,
+                    operation_id=operation_id,
+                ),
+            )
+            payload = {"job": _job_payload(job), "result": result.as_dict()}
+        elif command == "remove":
+            job, result = run_resource_mutation(
+                storage,
+                "resource_remove",
+                lambda operation_id: service.remove(
+                    args.resource_id, operation_id=operation_id
+                ),
+            )
+            payload = {"job": _job_payload(job), "result": result.as_dict()}
+        elif command == "restore":
+            job, result = run_resource_mutation(
+                storage,
+                "resource_restore",
+                lambda operation_id: service.restore(
+                    args.resource_id,
+                    version_id=args.version,
+                    operation_id=operation_id,
+                ),
+            )
+            payload = {"job": _job_payload(job), "result": result.as_dict()}
+        else:
+            job, result = run_resource_mutation(
+                storage,
+                "resource_model_use",
+                lambda operation_id: service.set_model_use(
+                    args.resource_id,
+                    args.permission == "allow",
+                    operation_id=operation_id,
+                ),
+            )
+            payload = {"job": _job_payload(job), "result": result.as_dict()}
+        _write(payload, as_json=args.json)
+        return 0
+    finally:
+        storage.close()
+
+
+def _resource_input_path(raw_path: str) -> Path:
+    path = Path(raw_path).expanduser().resolve()
+    if not path.is_file():
+        raise CorpusValidationError("Resource file does not exist or is not a file.")
+    return path
+
+
+def _resource_metadata_from_args(
+    args: argparse.Namespace,
+    *,
+    filename: str = "resource",
+    current: dict[str, object] | None = None,
+) -> ResourceMetadata:
+    current = current or {}
+    provenance = current.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+
+    def selected(argument: str, default: str = "") -> str:
+        value = getattr(args, argument, None)
+        return str(value if value is not None else provenance.get(argument, default))
+
+    return ResourceMetadata(
+        title=selected(
+            "title", str(current.get("name") or Path(filename).stem or "Resource")
+        ),
+        publisher=selected("publisher"),
+        category=selected("category", "reference"),
+        jurisdiction=selected("jurisdiction"),
+        original_url=(
+            selected("url", str(provenance.get("original_url") or "")) or None
+        ),
+        model_use_allowed=(
+            bool(getattr(args, "allow_model_use", False))
+            or bool(current.get("model_use_allowed", False))
+        ),
+    )
 
 
 def _jobs(context: WorkspaceContext, args: argparse.Namespace) -> int:
@@ -1287,10 +1493,13 @@ def _jobs(context: WorkspaceContext, args: argparse.Namespace) -> int:
                 runner = CorpusMaintenanceJobs(context, storage)
             elif record.job_type == "property_complete_export":
                 runner = PropertyExportJobs(context, storage)
+            elif record.job_type in {"resource_add", "resource_replace"}:
+                runner = ResourceJobs(context, storage)
             else:
                 raise InvalidJobTransition(
-                    "Only corpus and complete-property maintenance jobs can be "
-                    "resumed; interactive answers require explicit resubmission."
+                    "Only corpus, resource-import, and complete-property maintenance "
+                    "jobs can be resumed; interactive answers require explicit "
+                    "resubmission."
                 )
             try:
                 runner.resume(args.job_id)
@@ -1612,7 +1821,9 @@ def _ask(context: WorkspaceContext, args: argparse.Namespace) -> int:
             CredentialResolver(context),
         ).answer(
             args.question,
-            filters=LocalSearchFilters(source_slug=args.source),
+            filters=LocalSearchFilters(
+                source_slug=args.source, origin=_origin_for_scope(args.scope)
+            ),
             limit=args.limit,
             deadline=Deadline.after(deadline_seconds),
             operation_id=job.id,
@@ -1667,7 +1878,9 @@ def _debug_answer(context: WorkspaceContext, args: argparse.Namespace) -> int:
             CredentialResolver(context),
         ).answer(
             args.question,
-            filters=LocalSearchFilters(source_slug=args.source),
+            filters=LocalSearchFilters(
+                source_slug=args.source, origin=_origin_for_scope(args.scope)
+            ),
             limit=args.limit,
             deadline=Deadline.after(deadline_seconds),
             operation_id=job.id,
@@ -1833,36 +2046,15 @@ def _legacy(args: argparse.Namespace) -> int:
 
 
 def _migration_preflight(context: WorkspaceContext, args: argparse.Namespace) -> int:
-    if not context.initialized:
-        raise LocalSettingsError("Workspace is not initialized; run setup first.")
-    storage = LocalStorage.open(context.paths)
-    try:
-        versions = storage.versions()
-    finally:
-        storage.close()
-    supported = {
-        "corpus": CORPUS_SCHEMA_VERSION,
-        "state": STATE_SCHEMA_VERSION,
-    }
-    compatible = versions == supported
-    payload = {
-        "status": "compatible" if compatible else "migration_unavailable",
-        "read_only": True,
-        "current_schema_versions": versions,
-        "supported_schema_versions": supported,
-        "migration_required": not compatible,
-        "migration_available": False,
-        "backup_required_before_migration": not compatible,
-        "next_action": (
-            "No local schema migration is required for this release."
-            if compatible
-            else "Keep the current code and workspace. This release has no reviewed "
-            "migration path for these schema versions; do not downgrade or edit "
-            "schema metadata."
-        ),
-    }
+    payload = migration_preflight(context)
     _write(payload, as_json=args.json)
-    return 0 if compatible else EXIT_INVALID_CONFIGURATION
+    return 0 if payload["status"] == "compatible" else EXIT_INVALID_CONFIGURATION
+
+
+def _migration_apply(context: WorkspaceContext, args: argparse.Namespace) -> int:
+    result = migrate_workspace(context)
+    _write(result.as_dict(), as_json=args.json)
+    return 0
 
 
 def _evaluate_retrieval(context: WorkspaceContext, args: argparse.Namespace) -> int:
@@ -1926,13 +2118,16 @@ def _initialized_storage(context: WorkspaceContext) -> LocalStorage:
     if not context.initialized:
         raise LocalSettingsError("Workspace is not initialized; run setup first.")
     storage = LocalStorage.open(context.paths)
-    versions = storage.versions()
-    if versions != {"corpus": 1, "state": 1}:
+    try:
+        storage.assert_compatible()
+    except SchemaVersionError:
         storage.close()
-        raise SchemaVersionError(
-            "Local storage is not initialized or has incompatible schema versions."
-        )
+        raise
     return storage
+
+
+def _origin_for_scope(scope: str) -> str | None:
+    return {"official": "core", "mine": "user", "all": None}[scope]
 
 
 def _write(payload: dict[str, object], *, as_json: bool) -> None:

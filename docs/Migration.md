@@ -50,3 +50,21 @@ answers, logs, usage events, HPD rows, and private absolute paths are excluded.
 The original environment remains authoritative and unchanged until the maintainer
 separately decides to retire it. Deleting the old database/bucket or rotating its
 credentials is not part of migration.
+
+## Upgrading an existing local workspace
+
+Local schema upgrades are separate from hosted-data migration. Check first:
+
+```bash
+uv run nyc-housing migrate preflight --json
+```
+
+When the result reports `migration_available`, stop the browser app and run:
+
+```bash
+uv run nyc-housing migrate apply --json
+```
+
+The supported v1-to-v2 migration creates a timestamped backup under the
+workspace `backups` directory before adding user-resource provenance, locator,
+consent, and operation-receipt fields. Unknown schema versions fail closed.

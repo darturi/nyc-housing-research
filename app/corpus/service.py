@@ -132,9 +132,8 @@ class CorpusService:
             for source in parsed
         }
 
-        generation_id = str(uuid.uuid4())
         now = _utc_now()
-        selected_generation = generation_id
+        selected_generation: str | None = None
         try:
             with self._storage.corpus_engine.begin() as connection:
                 active_generation = connection.scalar(
@@ -155,53 +154,17 @@ class CorpusService:
                 if active_generation and selected_versions == previous_versions:
                     selected_generation = active_generation
                 else:
-                    missing = sorted(set(self._manifests) - set(selected_versions))
-                    if missing and not allow_partial:
-                        raise CorpusValidationError(
-                            "Core generation is missing source(s): "
-                            + ", ".join(missing)
-                        )
-                    readiness = "text_ready" if not missing else "partial_text_ready"
-                    connection.execute(
-                        insert(generations).values(
-                            id=generation_id,
-                            status="staged",
-                            profile_id=None,
-                            readiness=readiness,
-                            is_partial=bool(missing),
-                            validation_json=json.dumps(
-                                {"missing_sources": missing}, sort_keys=True
-                            ),
-                            created_at=now,
-                            activated_at=None,
-                        )
+                    selected_generation = self._publish_generation(
+                        connection,
+                        selected_versions,
+                        allow_partial=allow_partial,
+                        activate=activate,
+                        now=now,
                     )
-                    for version_id in selected_versions.values():
-                        connection.execute(
-                            insert(generation_sources).values(
-                                generation_id=generation_id,
-                                source_version_id=version_id,
-                            )
-                        )
-                        version_chunks = connection.execute(
-                            select(chunks.c.id).where(
-                                chunks.c.source_version_id == version_id
-                            )
-                        ).scalars()
-                        for chunk_id in version_chunks:
-                            connection.execute(
-                                insert(generation_chunks).values(
-                                    generation_id=generation_id,
-                                    chunk_id=chunk_id,
-                                    text_ready=True,
-                                    embedding_ready=False,
-                                )
-                            )
-                    self._build_fts(connection, generation_id)
-                    if activate:
-                        self._activate_in_transaction(connection, generation_id, now)
         finally:
             self._remove_unreferenced_artifacts(artifact_uris.values())
+        if selected_generation is None:
+            raise CorpusValidationError("Corpus generation could not be published.")
         return selected_generation
 
     def activate(self, generation_id: str, *, allow_partial: bool = False) -> None:
@@ -219,6 +182,7 @@ class CorpusService:
                 "text_ready",
                 "partial_text_ready",
                 "hybrid_ready",
+                "hybrid_partial",
             }:
                 raise CorpusValidationError("Generation is not validated for search.")
             if row["is_partial"] and not allow_partial:
@@ -547,6 +511,149 @@ class CorpusService:
         )
         return {slug: version_id for slug, version_id in rows}
 
+    def publish_versions(
+        self,
+        connection,
+        selected_versions: dict[str, str],
+        *,
+        allow_partial: bool = True,
+        activate: bool = True,
+        now: datetime | None = None,
+    ) -> str:
+        """Publish a generation from an explicit source-to-version mapping."""
+        return self._publish_generation(
+            connection,
+            selected_versions,
+            allow_partial=allow_partial,
+            activate=activate,
+            now=now or _utc_now(),
+        )
+
+    def _publish_generation(
+        self,
+        connection,
+        selected_versions: dict[str, str],
+        *,
+        allow_partial: bool,
+        activate: bool,
+        now: datetime,
+    ) -> str:
+        missing = sorted(set(self._manifests) - set(selected_versions))
+        if missing and not allow_partial:
+            raise CorpusValidationError(
+                "Core generation is missing source(s): " + ", ".join(missing)
+            )
+        version_ids = list(dict.fromkeys(selected_versions.values()))
+        if version_ids:
+            installed = set(
+                connection.scalars(
+                    select(source_versions.c.id).where(
+                        source_versions.c.id.in_(version_ids)
+                    )
+                )
+            )
+            unknown = sorted(set(version_ids) - installed)
+            if unknown:
+                raise CorpusValidationError(
+                    "Unknown source version(s): " + ", ".join(unknown)
+                )
+        active = connection.scalar(
+            select(corpus_state.c.active_generation_id).where(corpus_state.c.id == 1)
+        )
+        profile_id = (
+            connection.scalar(
+                select(generations.c.profile_id).where(generations.c.id == active)
+            )
+            if active
+            else None
+        )
+        chunk_rows = []
+        if version_ids:
+            chunk_rows = list(
+                connection.execute(
+                    select(
+                        chunks.c.id,
+                        source_modules.c.model_use_allowed,
+                    )
+                    .select_from(
+                        chunks.join(
+                            source_modules,
+                            source_modules.c.id == chunks.c.source_module_id,
+                        )
+                    )
+                    .where(chunks.c.source_version_id.in_(version_ids))
+                    .order_by(chunks.c.id)
+                ).mappings()
+            )
+        ready_ids: set[str] = set()
+        if profile_id and chunk_rows:
+            ready_ids = set(
+                connection.scalars(
+                    select(embeddings.c.chunk_id).where(
+                        embeddings.c.profile_id == profile_id,
+                        embeddings.c.chunk_id.in_([row["id"] for row in chunk_rows]),
+                    )
+                )
+            )
+        eligible_ids = {
+            row["id"] for row in chunk_rows if bool(row["model_use_allowed"])
+        }
+        embedding_ready_ids = ready_ids & eligible_ids
+        if profile_id and embedding_ready_ids:
+            readiness = (
+                "hybrid_ready"
+                if embedding_ready_ids == eligible_ids
+                else "hybrid_partial"
+            )
+        else:
+            readiness = "partial_text_ready" if missing else "text_ready"
+        generation_id = str(uuid.uuid4())
+        validation = {
+            "missing_sources": missing,
+            "embedding_eligible_chunks": len(eligible_ids),
+            "embedding_ready_chunks": len(embedding_ready_ids),
+        }
+        connection.execute(
+            insert(generations).values(
+                id=generation_id,
+                status="staged",
+                profile_id=profile_id,
+                readiness=readiness,
+                is_partial=bool(missing),
+                validation_json=json.dumps(validation, sort_keys=True),
+                created_at=now,
+                activated_at=None,
+            )
+        )
+        if version_ids:
+            connection.execute(
+                insert(generation_sources),
+                [
+                    {
+                        "generation_id": generation_id,
+                        "source_version_id": version_id,
+                    }
+                    for version_id in version_ids
+                ],
+            )
+        if chunk_rows:
+            connection.execute(
+                insert(generation_chunks),
+                [
+                    {
+                        "generation_id": generation_id,
+                        "chunk_id": row["id"],
+                        "text_ready": True,
+                        "embedding_ready": row["id"] in embedding_ready_ids,
+                    }
+                    for row in chunk_rows
+                ],
+            )
+        self._build_fts(connection, generation_id)
+        if activate:
+            self._activate_in_transaction(connection, generation_id, now)
+        return generation_id
+
     def _store_source(self, connection, parsed: ParsedSource, artifact_uri: str) -> str:
         manifest = parsed.manifest
         module_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"nyc-housing:{manifest.slug}"))
@@ -562,6 +669,9 @@ class CorpusService:
             "source_url": manifest.source_url,
             "scope_json": json.dumps({"description": manifest.scope}),
             "manifest_json": json.dumps(manifest.raw, sort_keys=True),
+            "origin": "core",
+            "acquisition_kind": "managed_download",
+            "model_use_allowed": True,
             "enabled": True,
         }
         if existing_module is None:
@@ -629,6 +739,14 @@ class CorpusService:
                 effective_to=None,
                 validation_state="validated",
                 validation_json=_source_validation_json(parsed),
+                provenance_json=json.dumps(
+                    {
+                        "origin": "core",
+                        "source_url": manifest.source_url,
+                        "publisher": manifest.publisher,
+                    },
+                    sort_keys=True,
+                ),
             )
         )
         for document in parsed.documents:
@@ -660,6 +778,10 @@ class CorpusService:
                         title=section.title,
                         text=section.text,
                         text_hash=text_hash,
+                        locator_json=json.dumps(
+                            {"section": section.citation or section.section_key},
+                            sort_keys=True,
+                        ),
                     )
                 )
                 candidates = extract_citations(section.text)
@@ -933,6 +1055,10 @@ def _artifact_extension(content_type: str | None, content: bytes) -> str:
         return "json"
     if "html" in normalized:
         return "html"
+    if "markdown" in normalized:
+        return "md"
+    if normalized.startswith("text/"):
+        return "txt"
     return "bin"
 
 

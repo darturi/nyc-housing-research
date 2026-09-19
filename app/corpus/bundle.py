@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, func, insert, select
 
 from app.corpus.embeddings import decode_vector
 from app.corpus.service import CorpusService, CorpusValidationError
@@ -82,7 +82,7 @@ class CanonicalBundleService:
             "format_version": BUNDLE_VERSION,
             "created_at": datetime.now(UTC).isoformat(),
             "generation_id": selected,
-            "scope": "active_legal_corpus",
+            "scope": "official_core_only",
             "excludes": [
                 "application_state",
                 "credentials",
@@ -90,6 +90,7 @@ class CanonicalBundleService:
                 "logs",
                 "questions_and_answers",
                 "sessions",
+                "user_resources",
                 "usage_events",
             ],
             "members": {
@@ -122,12 +123,41 @@ class CanonicalBundleService:
 
         artifact_uris = _publish_artifacts(payload, members, self._storage)
         with self._storage.corpus_engine.begin() as connection:
+            active_user_versions = _active_user_versions(connection)
             _insert_records(connection, payload, artifact_uris)
             CorpusService(self._storage)._build_fts(connection, summary.generation_id)
             if activate:
-                CorpusService(self._storage)._activate_in_transaction(
-                    connection, summary.generation_id, datetime.now(UTC)
-                )
+                if active_user_versions:
+                    selected = active_user_versions | _payload_versions_by_slug(payload)
+                    merged_id = CorpusService(self._storage).publish_versions(
+                        connection,
+                        selected,
+                        allow_partial=allow_partial,
+                        activate=True,
+                    )
+                    merged = connection.execute(
+                        select(generations).where(generations.c.id == merged_id)
+                    ).mappings().one()
+                    summary = BundleSummary(
+                        generation_id=merged_id,
+                        source_count=len(selected),
+                        chunk_count=int(
+                            connection.scalar(
+                                select(func.count())
+                                .select_from(generation_chunks)
+                                .where(
+                                    generation_chunks.c.generation_id == merged_id
+                                )
+                            )
+                            or 0
+                        ),
+                        embedding_count=summary.embedding_count,
+                        is_partial=bool(merged["is_partial"]),
+                    )
+                else:
+                    CorpusService(self._storage)._activate_in_transaction(
+                        connection, summary.generation_id, datetime.now(UTC)
+                    )
         return summary
 
 
@@ -141,15 +171,37 @@ def _export_records(connection, generation_id: str, storage: LocalStorage):
         raise CorpusValidationError(f"Unknown generation: {generation_id}")
     version_ids = list(
         connection.scalars(
-            select(generation_sources.c.source_version_id).where(
-                generation_sources.c.generation_id == generation_id
+            select(generation_sources.c.source_version_id)
+            .select_from(
+                generation_sources.join(
+                    source_versions,
+                    source_versions.c.id == generation_sources.c.source_version_id,
+                ).join(
+                    source_modules,
+                    source_modules.c.id == source_versions.c.source_module_id,
+                )
+            )
+            .where(
+                generation_sources.c.generation_id == generation_id,
+                source_modules.c.origin == "core",
             )
         )
     )
+    if not version_ids:
+        raise CorpusValidationError(
+            "The selected generation has no official core sources to export."
+        )
     chunk_ids = list(
         connection.scalars(
-            select(generation_chunks.c.chunk_id).where(
-                generation_chunks.c.generation_id == generation_id
+            select(generation_chunks.c.chunk_id)
+            .select_from(
+                generation_chunks.join(
+                    chunks, chunks.c.id == generation_chunks.c.chunk_id
+                )
+            )
+            .where(
+                generation_chunks.c.generation_id == generation_id,
+                chunks.c.source_version_id.in_(version_ids),
             )
         )
     )
@@ -235,7 +287,8 @@ def _export_records(connection, generation_id: str, storage: LocalStorage):
             _rows(
                 connection,
                 select(generation_sources).where(
-                    generation_sources.c.generation_id == generation_id
+                    generation_sources.c.generation_id == generation_id,
+                    generation_sources.c.source_version_id.in_(version_ids),
                 ),
             )
         ),
@@ -243,7 +296,8 @@ def _export_records(connection, generation_id: str, storage: LocalStorage):
             _rows(
                 connection,
                 select(generation_chunks).where(
-                    generation_chunks.c.generation_id == generation_id
+                    generation_chunks.c.generation_id == generation_id,
+                    generation_chunks.c.chunk_id.in_(chunk_ids),
                 ),
             )
         ),
@@ -337,6 +391,10 @@ def _validate_records(payload: dict, members: dict[str, bytes]) -> None:
         "chunks": {row["id"] for row in payload["chunks"]},
         "profiles": {row["id"] for row in payload["embedding_profiles"]},
     }
+    if any(row.get("origin", "core") != "core" for row in payload["source_modules"]):
+        raise CorpusValidationError(
+            "Portable corpus bundles cannot contain user-provided resources."
+        )
     generation_id = payload["generation"]["id"]
     for row in payload["source_versions"]:
         if row["source_module_id"] not in ids["modules"]:
@@ -394,6 +452,43 @@ def _publish_artifacts(payload: dict, members: dict[str, bytes], storage: LocalS
             _write_bytes_atomic(destination, content)
         result[row["id"]] = destination.relative_to(storage.paths.root).as_posix()
     return result
+
+
+def _active_user_versions(connection) -> dict[str, str]:
+    active = connection.scalar(
+        select(corpus_state.c.active_generation_id).where(corpus_state.c.id == 1)
+    )
+    if active is None:
+        return {}
+    rows = connection.execute(
+        select(source_modules.c.slug, generation_sources.c.source_version_id)
+        .select_from(
+            generation_sources.join(
+                source_versions,
+                source_versions.c.id == generation_sources.c.source_version_id,
+            ).join(
+                source_modules,
+                source_modules.c.id == source_versions.c.source_module_id,
+            )
+        )
+        .where(
+            generation_sources.c.generation_id == active,
+            source_modules.c.origin == "user",
+        )
+    )
+    return {slug: version_id for slug, version_id in rows}
+
+
+def _payload_versions_by_slug(payload: dict) -> dict[str, str]:
+    module_slugs = {row["id"]: row["slug"] for row in payload["source_modules"]}
+    versions = {
+        row["id"]: module_slugs[row["source_module_id"]]
+        for row in payload["source_versions"]
+    }
+    return {
+        versions[row["source_version_id"]]: row["source_version_id"]
+        for row in payload["generation_sources"]
+    }
 
 
 def _insert_records(connection, payload: dict, artifact_uris: dict[str, str]) -> None:

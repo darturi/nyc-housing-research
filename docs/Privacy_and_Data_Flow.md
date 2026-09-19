@@ -19,7 +19,7 @@ already running with the same OS-user privileges.
 | Official legal publishers | Public document request and normal HTTP metadata | Corpus install/update |
 | NYC Open Data | Structured property identifier, address/filter fields, optional app token | Live property lookup/refresh |
 | OpenAI | Question plus selected legal excerpts; selected HPD rows for property summaries | Model answer/summary |
-| OpenAI embeddings | Legal chunk text during approved indexing; query text for semantic retrieval | Index or semantic answer/search path |
+| OpenAI embeddings | Eligible legal chunk text during approved indexing; query text for semantic retrieval | Index or semantic answer/search path |
 | User-configured OpenAI-compatible endpoint | The same selected answer or embedding payload sent to that endpoint only | Explicit advanced profile configuration and compatibility check |
 | GitHub API | Repository release request and normal HTTP metadata | Manual `update-check` |
 
@@ -27,6 +27,12 @@ OpenAI answer calls explicitly send `store: false`; that is an API request optio
 not a claim about every aspect of provider-side abuse monitoring or retention.
 Review the provider's current policy before use. A Socrata token is optional and
 is treated as a secret.
+
+User-provided resources are stored in the local workspace and begin with model
+use disabled. Local exact and keyword search still work. Semantic indexing and
+generated answers exclude that resource until its per-resource provider-use
+setting is explicitly enabled; disabling it again removes it from subsequent
+provider-backed retrieval and indexing work.
 
 For a custom endpoint, `stores_response` and any pricing metadata are supplied by
 the operator and are not independently verified by this application. The endpoint
@@ -76,7 +82,9 @@ addresses, prompts, and provider response bodies.
 Default backups exclude property cache unless `--include-property-cache` is
 explicit. They always exclude credentials, local sessions, launcher tokens,
 memory-only transcripts, and unrelated exports. Research exports intentionally
-contain the question/evidence or property rows the user selected.
+contain the question/evidence or property rows the user selected. Workspace
+backups include user-provided resources so restore is complete. Portable corpus
+bundles contain official core sources only and exclude user resources.
 
 ## Offline mode
 

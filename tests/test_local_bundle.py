@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.corpus.bundle import CanonicalBundleService
+from app.corpus.resources import ResourceMetadata, ResourceService
 from app.corpus.service import CorpusService, CorpusValidationError, SourceArtifact
 from app.retrieval.local import LocalSearch
 from app.storage.database import LocalStorage
@@ -101,3 +102,42 @@ def test_bundle_rejects_unsafe_members(tmp_path) -> None:
             CanonicalBundleService(storage).inspect(bundle)
     finally:
         storage.close()
+
+
+def test_bundle_excludes_user_resources_and_import_preserves_local_ones(
+    tmp_path,
+) -> None:
+    source = _workspace(tmp_path / "source")
+    target = _workspace(tmp_path / "target")
+    try:
+        _install_fixture(source)
+        private_phrase = b"Private tenant chronology marker."
+        ResourceService(source).add(
+            private_phrase,
+            filename="chronology.txt",
+            metadata=ResourceMetadata(title="Private chronology"),
+        )
+        destination = tmp_path / "official-only.nychousing"
+        exported = CanonicalBundleService(source).export(destination)
+        assert exported.source_count == 1
+        with zipfile.ZipFile(destination) as archive:
+            records = archive.read("records.json")
+            manifest = archive.read("manifest.json")
+        assert private_phrase not in records
+        assert b"user_resources" in manifest
+
+        local = ResourceService(target).add(
+            b"Target-only tenant memorandum.",
+            filename="target.txt",
+            metadata=ResourceMetadata(title="Target memo"),
+        )
+        imported = CanonicalBundleService(target).import_bundle(
+            destination, allow_partial=True
+        )
+        assert imported.source_count == 2
+        assert LocalSearch(target).search("Target-only tenant memorandum").results
+        assert ResourceService(target).get(local.resource_id)["active"] is True
+        assert LocalSearch(target).search("RPAPL section 711").results
+    finally:
+        source.close()
+        target.close()
