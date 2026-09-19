@@ -86,6 +86,20 @@ class LocalStorage:
             "state",
         )
         with self.state_engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS matter_fts USING fts5(
+                        matter_id UNINDEXED,
+                        item_id UNINDEXED,
+                        title,
+                        body,
+                        tags,
+                        tokenize = 'unicode61 remove_diacritics 2'
+                    )
+                    """
+                )
+            )
             barrier_exists = connection.scalar(
                 select(maintenance_state.c.id).where(maintenance_state.c.id == 1)
             )

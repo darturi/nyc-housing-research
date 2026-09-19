@@ -69,6 +69,8 @@ The application downloads rather than republishes the following material:
 | RPAPL | New York State Senate | Public access; redistribution review unresolved |
 | Real Property Law Article 6-A and § 231-c | New York State Senate | Public access; redistribution review unresolved |
 | HPD tenant/owner guidance | NYC HPD | Public access; redistribution review unresolved |
+| NYC Rent Stabilization Law (optional pack) | NYC Council / American Legal Publishing | Public access; redistribution review unresolved |
+| DHCR rent-regulation guidance (optional pack) | New York State Homes and Community Renewal | Public access; redistribution review unresolved |
 | HPD Housing Maintenance Code Violations | NYC Open Data dataset `wvxf-dwi5` | Live filtered access; verify current NYC Open Data terms before redistribution |
 
 The versioned source manifests preserve publisher URLs and mark each legal source

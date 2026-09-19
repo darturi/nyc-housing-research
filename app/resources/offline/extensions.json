@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "extensions": [
+    {
+      "id": "local-model-pack",
+      "kind": "local_model",
+      "status": "selection_required",
+      "installable": false,
+      "reason_code": "reviewed_runtime_profile_not_selected",
+      "description": "A runtime, weight set, tokenizer, license, platform matrix, and legal-answer evaluation must be selected and pinned before managed installation is enabled."
+    },
+    {
+      "id": "hpd-violations-snapshot",
+      "kind": "hpd_snapshot",
+      "status": "acquisition_recipe_pending",
+      "installable": false,
+      "reason_code": "full_export_consistency_not_verified",
+      "description": "The official full-export recipe, consistency limits, storage benchmark, and reconciliation checks must be verified before a bulk snapshot can be labeled complete."
+    }
+  ]
+}

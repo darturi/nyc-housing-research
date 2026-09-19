@@ -13,7 +13,7 @@ SECTION_MARKER = r"(?:§+|sections?|sec\.?)"
 
 HMC_PATTERN = re.compile(
     rf"(?:NYC\s+Admin(?:istrative)?\s+Code|Housing\s+Maintenance\s+Code)?"
-    rf"\s*(?:{SECTION_MARKER}\s*)?(27-\d{{3,5}})",
+    rf"\s*(?:{SECTION_MARKER}\s*)?((?:27-\d{{3,5}}|26-5\d{{2}}(?:\.\d+)?))",
     re.IGNORECASE,
 )
 MDL_PATTERN = re.compile(

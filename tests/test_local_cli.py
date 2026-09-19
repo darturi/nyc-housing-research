@@ -33,7 +33,7 @@ def test_setup_and_status_are_idempotent_and_do_not_run_paid_work(
     assert first["status"] == "initialized"
     assert first["application_version"].startswith("0.1.0")
     assert "No paid request" in first["message"]
-    assert first["schema_versions"] == {"corpus": 2, "state": 1}
+    assert first["schema_versions"] == {"corpus": 2, "state": 2}
     assert (root / "corpus.sqlite3").is_file()
     assert (root / "state.sqlite3").is_file()
 

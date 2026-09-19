@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ ui_locale }}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,18 +7,19 @@
     <link rel="stylesheet" href="/static/web.css">
   </head>
   <body class="local-app" data-initialized="{{ 'true' if initialized else 'false' }}">
-    <a class="skip-link" href="#main-content">Skip to workspace</a>
+    <a class="skip-link" href="#main-content" data-i18n="skip.workspace">Skip to workspace</a>
     <header class="topbar">
       <div class="product-brand">
         <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
         <span class="brand-copy">
-          <strong>NYC Housing Research</strong>
-          <span>Private evidence workspace</span>
+          <strong data-i18n="brand.title">NYC Housing Research</strong>
+          <span data-i18n="brand.subtitle">Private evidence workspace</span>
         </span>
       </div>
       <div class="topbar-status">
-        <span class="privacy-indicator"><span aria-hidden="true"></span>Stays on this machine</span>
-        <span class="route-badge">{% if offline %}offline mode{% else %}local mode{% endif %}</span>
+        <label class="form-field" for="ui-locale"><span class="sr-only">Interface language</span><select id="ui-locale"><option value="en">English</option><option value="es">Español</option></select></label>
+        <span class="privacy-indicator"><span aria-hidden="true"></span><span data-i18n="privacy.local">Stays on this machine</span></span>
+        <span class="route-badge" data-i18n="{% if offline %}mode.offline{% else %}mode.local{% endif %}">{% if offline %}offline mode{% else %}local mode{% endif %}</span>
       </div>
     </header>
     <main id="main-content" class="workspace">
@@ -26,8 +27,8 @@
         <div class="connect-copy">
           <span class="connect-lock" aria-hidden="true"></span>
           <div>
-            <h1 id="connect-title">Connect this browser</h1>
-            <p>
+            <h1 id="connect-title" data-i18n="connect.title">Connect this browser</h1>
+            <p data-i18n="connect.body">
               The app listens only on this machine. A one-time launch code prevents
               unrelated web pages from controlling the local service.
             </p>
@@ -35,37 +36,41 @@
         </div>
         <form id="launch-form" class="query-form">
           <div class="form-field">
-            <label for="launch-code">One-time launch code</label>
+            <label for="launch-code" data-i18n="connect.code">One-time launch code</label>
             <input id="launch-code" autocomplete="off" spellcheck="false">
           </div>
-          <button type="submit">Connect</button>
+          <button type="submit" data-i18n="connect.button">Connect</button>
         </form>
         <p id="launch-status" class="meta-line" aria-live="polite">
-          Waiting for the launch credential from <code>nyc-housing serve</code>.
+          <span data-i18n="connect.waiting">Waiting for the launch credential from nyc-housing serve.</span>
         </p>
       </section>
 
       <div id="application" class="app-shell" hidden>
         <aside class="workspace-rail">
           <div class="rail-heading">
-            <h1>Research desk</h1>
+            <h1 data-i18n="nav.desk">Research desk</h1>
             <p>NYC law and property records, organized for verification.</p>
           </div>
           <nav class="local-nav" aria-label="Workspace sections">
             <button class="nav-button" data-view="research" aria-pressed="true">
-              <span class="nav-title">Research</span>
+              <span class="nav-title" data-i18n="nav.research">Research</span>
               <span class="nav-detail">Search law and HPD records</span>
             </button>
             <button class="nav-button secondary-button" data-view="sources" aria-pressed="false">
-              <span class="nav-title">Sources</span>
+              <span class="nav-title" data-i18n="nav.sources">Sources</span>
               <span class="nav-detail">Manage searchable sources</span>
             </button>
+            <button class="nav-button secondary-button" data-view="matters" aria-pressed="false">
+              <span class="nav-title" data-i18n="nav.matters">Matters</span>
+              <span class="nav-detail">Saved answers, searches, dossiers, and notes</span>
+            </button>
             <button class="nav-button secondary-button" data-view="settings" aria-pressed="false">
-              <span class="nav-title">Settings</span>
+              <span class="nav-title" data-i18n="nav.settings">Settings</span>
               <span class="nav-detail">API key, usage, and limits</span>
             </button>
             <button class="nav-button secondary-button" data-view="guide" aria-pressed="false">
-              <span class="nav-title">Guide</span>
+              <span class="nav-title" data-i18n="nav.guide">Guide</span>
               <span class="nav-detail">Purpose, workflow, and limits</span>
             </button>
           </nav>
@@ -80,8 +85,8 @@
         <section id="view-research" class="app-view" aria-labelledby="research-title">
           <header class="view-header">
             <div>
-              <h2 id="research-title">Research the record</h2>
-              <p>Search installed public sources or request a provider-backed answer with citations.</p>
+              <h2 id="research-title" data-i18n="research.title">Research the record</h2>
+              <p data-i18n="research.description">Search installed public sources or request a provider-backed answer with citations.</p>
             </div>
             <span class="local-action-badge">Local search is free</span>
           </header>
@@ -90,12 +95,12 @@
               <div class="query-band result-shell">
                 <form id="research-form" class="query-form">
                   <div class="form-field question-field">
-                    <label for="question">Question or search terms</label>
+                    <label for="question" data-i18n="research.question">Question or search terms</label>
                     <textarea id="question" maxlength="4000" required placeholder="Example: What heat must a landlord provide during winter?"></textarea>
                   </div>
                   <div class="research-controls">
                     <div class="form-field">
-                      <label for="research-mode">Research mode</label>
+                      <label for="research-mode" data-i18n="research.mode">Research mode</label>
                       <select id="research-mode">
                         <option value="auto">Automatic (free)</option>
                         <option value="search">Search sources only</option>
@@ -104,22 +109,30 @@
                       </select>
                     </div>
                     <div class="form-field source-field">
-                      <label for="research-source">Source filter</label>
+                      <label for="research-source" data-i18n="research.source">Source filter</label>
                       <select id="research-source">
                         <option value="">All installed sources</option>
                       </select>
                     </div>
                     <div class="form-field">
-                      <label for="research-scope">Resource scope</label>
+                      <label for="research-scope" data-i18n="research.scope">Resource scope</label>
                       <select id="research-scope">
                         <option value="core">Official only</option>
                         <option value="user">My resources</option>
                         <option value="all">Official + mine</option>
                       </select>
                     </div>
+                    <div class="form-field">
+                      <label for="answer-language" data-i18n="research.language">Answer language</label>
+                      <select id="answer-language"><option value="en" data-i18n="language.english">English</option><option value="es" data-i18n="language.spanish">Spanish</option></select>
+                    </div>
+                    <div class="form-field">
+                      <label for="reading-style" data-i18n="research.style">Reading style</label>
+                      <select id="reading-style"><option value="standard" data-i18n="style.standard">Standard</option><option value="plain" data-i18n="style.plain">Plain language</option></select>
+                    </div>
                     <div class="property-actions research-actions">
-                      <button type="submit">Run research</button>
-                      <button id="answer-cancel" type="button" class="secondary-button" hidden>Cancel answer</button>
+                      <button type="submit" data-i18n="research.run">Run research</button>
+                      <button id="answer-cancel" type="button" class="secondary-button" hidden data-i18n="answer.cancel">Cancel answer</button>
                     </div>
                   </div>
                   <p class="form-footnote">Answer mode may send the question and selected excerpts to your chosen provider and records estimated cost locally.</p>
@@ -129,6 +142,11 @@
                 <strong>No evidence loaded</strong>
                 <span>Ask a question to inspect the installed public record.</span>
               </div>
+              <section class="result-shell" aria-labelledby="help-resources-title">
+                <div class="panel-heading"><div><h2 id="help-resources-title" data-i18n="help.title">Get housing help</h2><p data-i18n="help.description">Official NYC contact and action pages, readable without a model.</p></div></div>
+                <button id="help-resources-open" type="button" class="secondary-button" data-i18n="help.open">Show help resources</button>
+                <div id="help-resources" aria-live="polite"></div>
+              </section>
             </div>
             <aside class="result-shell property-panel" aria-labelledby="property-title">
               <div class="panel-heading">
@@ -216,6 +234,7 @@
                 <button id="property-refresh" type="button" class="secondary-button" hidden>Refresh from HPD</button>
                 <button id="property-next" type="button" class="secondary-button" hidden>Next page</button>
                 <button id="property-summary" type="button" class="secondary-button" hidden>Summarize loaded page</button>
+                <button id="property-dossier" type="button" class="secondary-button" hidden>Create dossier snapshot</button>
                 <button id="property-export" type="button" class="secondary-button" hidden>Export loaded CSV</button>
                 <button id="property-export-complete" type="button" class="secondary-button" hidden>Export up to 20 pages</button>
                 <button id="property-export-cancel" type="button" class="secondary-button" hidden>Cancel full export</button>
@@ -273,18 +292,28 @@
             </div>
             <p id="index-action-status" class="meta-line" aria-live="polite"></p>
           </div>
+          <div class="result-shell sources-panel source-packs-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Available source packs</h2>
+                <p>Add optional official publications without changing core readiness.</p>
+              </div>
+            </div>
+            <ul id="source-pack-list" class="citation-list"></ul>
+            <p id="source-pack-action-status" class="meta-line" aria-live="polite"></p>
+          </div>
           <div class="result-shell sources-panel user-resources-panel">
             <div class="panel-heading">
               <div>
                 <h2>My resources</h2>
-                <p>Add PDF, Markdown, or UTF-8 text files to local search.</p>
+                <p>Add PDF, DOCX, Markdown, or UTF-8 text files to local search.</p>
               </div>
               <span class="local-action-badge">Stored locally</span>
             </div>
             <form id="resource-form" class="query-form resource-form">
               <div class="form-field resource-file-field">
                 <label for="resource-file">File (maximum 25 MiB)</label>
-                <input id="resource-file" name="file" type="file" accept=".pdf,.md,.markdown,.txt,application/pdf,text/plain,text/markdown" required>
+                <input id="resource-file" name="file" type="file" accept=".pdf,.docx,.md,.markdown,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown" required>
               </div>
               <div class="form-field">
                 <label for="resource-title">Title</label>
@@ -327,6 +356,29 @@
               <ul id="job-list" class="citation-list"></ul>
             </div>
           </details>
+        </section>
+
+        <section id="view-matters" class="app-view" aria-labelledby="matters-title" hidden>
+          <header class="view-header">
+            <div><h2 id="matters-title">Research matters</h2><p>Keep selected results and evidence in named, local notebooks.</p></div>
+            <span class="local-action-badge">Explicit saves only</span>
+          </header>
+          <div class="settings-stack">
+            <section class="result-shell">
+              <form id="matter-form" class="query-form">
+                <div class="form-field"><label for="matter-title">New matter title</label><input id="matter-title" maxlength="255" required></div>
+                <div class="form-field"><label for="matter-description">Description</label><textarea id="matter-description" maxlength="20000"></textarea></div>
+                <div class="form-field"><label for="matter-tags">Tags, separated by commas</label><input id="matter-tags"></div>
+                <button type="submit">Create matter</button>
+              </form>
+              <p id="matter-status" class="meta-line" aria-live="polite"></p>
+            </section>
+            <section class="result-shell">
+              <div class="panel-heading"><div><h2>Saved matters</h2><p>Saved evidence is immutable; titles, tags, descriptions, and notes remain editable.</p></div><button id="matters-refresh" type="button" class="secondary-button">Refresh</button></div>
+              <ul id="matter-list" class="citation-list"></ul>
+            </section>
+            <section id="matter-detail" class="result-shell" aria-live="polite" hidden></section>
+          </div>
         </section>
 
         <section id="view-settings" class="app-view" aria-labelledby="settings-title" hidden>
@@ -403,6 +455,20 @@
                   <input id="offline-mode" type="checkbox">
                   <span><strong>Work offline after restart</strong><small>Block network access managed by this application.</small></span>
                 </label>
+              </section>
+
+              <section class="settings-section" aria-labelledby="language-settings-title">
+                <div class="settings-section-heading"><div><h2 id="language-settings-title">Language and reading</h2><p>Interface language is separate from answer language and style.</p></div></div>
+                <div class="settings-form-grid">
+                  <div class="form-field"><label for="default-answer-language">Default answer language</label><select id="default-answer-language"><option value="en">English</option><option value="es">Español</option></select></div>
+                  <div class="form-field"><label for="default-reading-style">Default reading style</label><select id="default-reading-style"><option value="standard">Standard</option><option value="plain">Plain language</option></select></div>
+                </div>
+              </section>
+
+              <section class="settings-section" aria-labelledby="offline-readiness-title">
+                <div class="settings-section-heading"><div><h2 id="offline-readiness-title">Offline research readiness</h2><p>Legal sources, local models, and HPD snapshots are checked independently.</p></div></div>
+                <button id="offline-readiness-check" type="button" class="secondary-button">Check offline readiness</button>
+                <div id="offline-readiness-result" class="meta-line" aria-live="polite"></div>
               </section>
 
               <details class="settings-disclosure">

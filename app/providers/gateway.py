@@ -49,7 +49,7 @@ class ProviderGateway:
     ) -> None:
         self._context = context
         self._ledger = ledger
-        self._client = client or httpx.Client()
+        self._client = client or httpx.Client(trust_env=False, follow_redirects=False)
         self._owns_client = client is None
 
     def close(self) -> None:
@@ -260,9 +260,7 @@ class ProviderGateway:
                         "The answer provider failed after request submission."
                     )
                 if response.status_code >= 400:
-                    self._settle(
-                        reservation, profile, Decimal("0"), 0, 0, snapshot
-                    )
+                    self._settle(reservation, profile, Decimal("0"), 0, 0, snapshot)
                     raise ProviderExecutionError(
                         "The answer provider rejected the request "
                         f"({response.status_code})."

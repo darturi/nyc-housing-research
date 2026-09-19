@@ -33,6 +33,23 @@ VECTOR_CACHE_MAX_BYTES = 256 * 1024**2
 SOURCE_HINTS: tuple[tuple[re.Pattern, str], ...] = (
     (
         re.compile(
+            r"\brent\s+stabilization\s+law\b|"
+            r"(?:NYC\s+)?admin(?:istrative)?\s+code\s*(?:§|section)?\s*26-5|"
+            r"\b26-5\d{2}(?:\.\d+)?\b",
+            re.I,
+        ),
+        "nyc-rent-stabilization-law",
+    ),
+    (
+        re.compile(
+            r"\bDHCR\b|preferential\s+rent|renewal\s+lease|"
+            r"rent[-\s]?stabilized|rent\s+stabilization|succession\s+rights",
+            re.I,
+        ),
+        "dhcr-rent-regulation-guidance",
+    ),
+    (
+        re.compile(
             r"\bgood\s+cause\b|article\s+6-a|"
             r"\bRPL\s*(?:§|section)?\s*(?:21[0-6]|231-c)",
             re.I,
@@ -586,9 +603,7 @@ def _search_result(
         source_name=str(provenance.get("title") or row["source_name"]),
         source_type=row["source_type"],
         jurisdiction=str(
-            (provenance.get("jurisdiction") or "")
-            if is_user
-            else row["jurisdiction"]
+            (provenance.get("jurisdiction") or "") if is_user else row["jurisdiction"]
         ),
         source_url=row["source_url"],
         publisher=str(
@@ -598,7 +613,11 @@ def _search_result(
         model_use_allowed=bool(row["model_use_allowed"]),
         source_version_id=row["source_version_id"],
         content_hash=row["content_hash"],
-        category=str(provenance.get("category") or "official"),
+        category=str(
+            provenance.get("category")
+            or provenance.get("authority_category")
+            or "official"
+        ),
         locator=_json_object(row.get("locator_json")),
         retrieved_at=_iso_timestamp(row["retrieved_at"]),
         last_checked_at=_iso_timestamp(row["last_checked_at"]),

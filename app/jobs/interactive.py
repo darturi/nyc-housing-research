@@ -57,6 +57,8 @@ class InteractiveAnswerJobs:
         limit: int = 8,
         deadline_seconds: float | None = None,
         allow_unknown_cost: bool = False,
+        answer_language: str | None = None,
+        reading_style: str | None = None,
     ) -> str:
         deadline_seconds = (
             deadline_seconds
@@ -85,6 +87,8 @@ class InteractiveAnswerJobs:
             deadline_seconds,
             signal,
             allow_unknown_cost,
+            answer_language,
+            reading_style,
         )
         return job.id
 
@@ -114,7 +118,12 @@ class InteractiveAnswerJobs:
                 "mode": "answer",
                 "state": job.state.value,
                 "stage": record.stage if record else job.stage,
-                "coverage": {"evidence_count": len(evidence)},
+                "coverage": {
+                    "evidence_count": len(evidence),
+                    "source_pack_notices": (
+                        result.get("coverage_notices", []) if result else []
+                    ),
+                },
                 "warnings": (
                     ["The in-memory result expired; submit the question again."]
                     if expired
@@ -167,6 +176,8 @@ class InteractiveAnswerJobs:
         deadline_seconds,
         signal,
         allow_unknown_cost,
+        answer_language,
+        reading_style,
     ):
         worker_id = f"web-{uuid.uuid4()}"
         gateway = ProviderGateway(self._context, UsageLedger(self._storage))
@@ -214,6 +225,8 @@ class InteractiveAnswerJobs:
                 on_evidence=evidence_ready,
                 on_answer_delta=answer_delta,
                 allow_unknown_cost=allow_unknown_cost,
+                answer_language=answer_language,
+                reading_style=reading_style,
             )
             with self._lock:
                 record = self._records.get(job_id)

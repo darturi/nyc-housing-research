@@ -39,7 +39,7 @@ class WorkspaceContext:
         context = cls(
             paths=paths,
             settings=settings,
-            network=NetworkPolicy(offline=settings.offline),
+            network=network_policy_for_settings(settings),
             detected_legacy_environment=tuple(legacy_environment_names(environment)),
         )
         if initialize:
@@ -53,3 +53,13 @@ class WorkspaceContext:
     def initialize(self) -> None:
         self.paths.create()
         save_local_settings(self.paths, self.settings)
+
+
+def network_policy_for_settings(settings: LocalSettings) -> NetworkPolicy:
+    endpoint = settings.local_runtime_endpoint
+    enabled = bool(settings.local_runtime_enabled and endpoint)
+    return NetworkPolicy(
+        offline=settings.offline,
+        allow_loopback_services=enabled,
+        allowed_loopback_urls=(str(endpoint),) if enabled else (),
+    )

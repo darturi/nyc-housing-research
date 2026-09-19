@@ -1,0 +1,93 @@
+{
+  "format_version": 1,
+  "catalog_version": 1,
+  "packs": [
+    {
+      "id": "rent-regulation",
+      "catalog_verified_at": "2026-09-19",
+      "title": "Rent regulation",
+      "description": "Optional primary-law and agency-guidance sources for New York City rent-stabilization research.",
+      "jurisdiction": "NYC",
+      "support_status": "partial",
+      "dependencies": [],
+      "query_terms": [
+        "rent stabilization",
+        "rent stabilized",
+        "dhcr",
+        "preferential rent",
+        "renewal lease",
+        "succession rights",
+        "26-5"
+      ],
+      "supported_topics": [
+        "rent-stabilization coverage explanations",
+        "leases and renewals",
+        "rent increases and overcharge guidance",
+        "succession",
+        "living conditions and essential services"
+      ],
+      "limitations": [
+        "Does not determine whether an individual apartment is regulated.",
+        "Does not calculate a lawful rent or current annual adjustment.",
+        "Historical applicability and case-law treatment require additional sources."
+      ],
+      "missing_modules": [
+        "Current complete Rent Stabilization Code publication",
+        "Reviewed Emergency Tenant Protection Act publication",
+        "Reviewed DHCR fact-sheet and operational-bulletin editions"
+      ],
+      "modules": [
+        {
+          "slug": "nyc-rent-stabilization-law",
+          "name": "NYC Rent Stabilization Law",
+          "source_type": "law",
+          "authority_category": "statute",
+          "publisher": "New York City Council / American Legal Publishing",
+          "jurisdiction": "NYC",
+          "source_url": "https://codelibrary.amlegal.com/codes/newyorkcity/latest/NYCadmin/0-0-0-1",
+          "download_url": "https://files.amlegal.com/pdffiles/NewYorkCity/Admin/XML.zip",
+          "parser": "nyc_admin_xml_range",
+          "parser_version": "1",
+          "update_policy": "publisher_snapshot",
+          "acquisition_review": "live_verified_2026-09-19",
+          "scope": "NYC Administrative Code sections 26-501 through 26-520",
+          "section_prefix": "26-5",
+          "section_start": "26-501",
+          "section_end": "26-520",
+          "required_citations": [
+            "NYC Admin Code § 26-501",
+            "NYC Admin Code § 26-520"
+          ],
+          "license_status": "official-public-access; redistribution review required",
+          "redistribution_allowed": null
+        },
+        {
+          "slug": "dhcr-rent-regulation-guidance",
+          "name": "DHCR Rent Regulation Guidance",
+          "source_type": "guidance",
+          "authority_category": "agency_guidance",
+          "publisher": "New York State Homes and Community Renewal",
+          "jurisdiction": "NYC",
+          "source_url": "https://hcr.ny.gov/rent-stabilization-and-emergency-tenant-protection-act",
+          "download_url": "https://hcr.ny.gov/rent-stabilization-and-emergency-tenant-protection-act",
+          "parser": "curated_guidance_bundle",
+          "parser_version": "1",
+          "update_policy": "curated_page_allowlist",
+          "acquisition_review": "live_verified_2026-09-19",
+          "scope": "Curated HCR overview, lease, rent, succession, and essential-services guidance pages",
+          "document_urls": [
+            "https://hcr.ny.gov/rent-stabilization-and-emergency-tenant-protection-act",
+            "https://hcr.ny.gov/leases",
+            "https://hcr.ny.gov/rent-increases-and-rent-overcharge",
+            "https://hcr.ny.gov/succession",
+            "https://hcr.ny.gov/living-conditions-and-essential-services"
+          ],
+          "required_citations": [],
+          "minimum_documents": 5,
+          "license_status": "official-public-access; redistribution review required",
+          "redistribution_allowed": null
+        }
+      ]
+    }
+  ]
+}

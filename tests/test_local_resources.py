@@ -149,7 +149,7 @@ def test_duplicate_upload_returns_existing_resource(tmp_path) -> None:
 @pytest.mark.parametrize(
     ("content", "filename", "message"),
     [
-        (b"not supported", "notes.docx", "Unsupported resource type"),
+        (b"not supported", "notes.docx", "not a valid OOXML package"),
         (b"\xff\xfe", "notes.txt", "UTF-8"),
         (b"%PDF-not-a-real-document", "scan.pdf", "malformed"),
     ],

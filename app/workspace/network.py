@@ -13,6 +13,7 @@ class NetworkAccessDenied(RuntimeError):
 class NetworkPolicy:
     offline: bool
     allow_loopback_services: bool = False
+    allowed_loopback_urls: tuple[str, ...] = ()
 
     def assert_url_allowed(self, url: str, *, purpose: str) -> None:
         parsed = urlparse(url)
@@ -21,7 +22,11 @@ class NetworkPolicy:
         if not self.offline:
             return
         if self.allow_loopback_services and _is_loopback(parsed.hostname):
-            return
+            if not self.allowed_loopback_urls or url in self.allowed_loopback_urls:
+                return
+            raise NetworkAccessDenied(
+                f"Offline mode permits only the selected local endpoint for {purpose}."
+            )
         raise NetworkAccessDenied(
             f"Offline mode blocks outbound network access for {purpose}."
         )

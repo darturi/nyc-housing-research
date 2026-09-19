@@ -71,9 +71,7 @@ class WorkspaceBackupService:
             for index, source in enumerate(artifact_paths, start=1):
                 member = f"artifacts/{index:06d}-{source.name}"
                 members[member] = source.read_bytes()
-                artifact_map[
-                    str(source.relative_to(self._storage.paths.root))
-                ] = member
+                artifact_map[str(source.relative_to(self._storage.paths.root))] = member
             metadata = {
                 "format": BACKUP_FORMAT,
                 "format_version": BACKUP_VERSION,
@@ -197,6 +195,8 @@ def restore_backup(archive: Path, destination: Path) -> BackupSummary:
             if versions not in (
                 {"corpus": CORPUS_SCHEMA_VERSION, "state": STATE_SCHEMA_VERSION},
                 {"corpus": 1, "state": 1},
+                {"corpus": 1, "state": 2},
+                {"corpus": 2, "state": 1},
             ):
                 raise BackupError("Backup schema versions are incompatible.")
         finally:

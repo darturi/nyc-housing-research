@@ -23,6 +23,13 @@ HMC_HEADING_PATTERN = re.compile(
     r"^§+\s*(?P<section_number>27-\d{3,5})\s+(?P<title>.+?)\s*$",
     re.IGNORECASE,
 )
+NYC_ADMIN_HEADING_PATTERN = re.compile(
+    r"^§+\s*(?P<section_number>\d{2}-\d{3,5}(?:\.\d+)?)\.?\s+"
+    r"(?P<title>.+?)\s*$",
+    re.IGNORECASE,
+)
+MAX_XML_MEMBER_BYTES = 100 * 1024 * 1024
+MAX_XML_TOTAL_BYTES = 500 * 1024 * 1024
 
 
 def parse_hmc_bulk_xml_document(
@@ -44,13 +51,82 @@ def hmc_xml_from_zip(zip_content: bytes) -> bytes:
 
 
 def parse_hmc_xml_sections(xml_content: bytes) -> list[ParsedSection]:
+    return _parse_admin_xml_sections(xml_content, HMC_HEADING_PATTERN)
+
+
+def parse_nyc_admin_xml_range_sections(
+    zip_content: bytes,
+    *,
+    section_start: str,
+    section_end: str,
+) -> list[ParsedSection]:
+    """Extract an inclusive Administrative Code range from the AmLegal bulk ZIP."""
+    selected: dict[str, ParsedSection] = {}
+    with zipfile.ZipFile(BytesIO(zip_content)) as archive:
+        total_size = sum(item.file_size for item in archive.infolist())
+        if total_size > MAX_XML_TOTAL_BYTES:
+            raise ValueError("AmLegal XML ZIP exceeds the uncompressed size limit.")
+        for item in archive.infolist():
+            if item.is_dir() or not item.filename.lower().endswith(".xml"):
+                continue
+            if item.file_size > MAX_XML_MEMBER_BYTES:
+                raise ValueError("AmLegal XML member exceeds the size limit.")
+            try:
+                candidates = _parse_admin_xml_sections(
+                    archive.read(item),
+                    NYC_ADMIN_HEADING_PATTERN,
+                    require_sections=False,
+                )
+            except ElementTree.ParseError:
+                continue
+            for section in candidates:
+                number = _section_number(section.citation)
+                if number is None:
+                    continue
+                if (
+                    _section_order(section_start)
+                    <= _section_order(number)
+                    <= _section_order(section_end)
+                ):
+                    current = selected.get(section.citation)
+                    if current is None or len(section.text) > len(current.text):
+                        selected[section.citation] = section
+    if not selected:
+        raise ValueError(
+            "AmLegal XML did not contain the configured Administrative Code range."
+        )
+    return [
+        ParsedSection(
+            section_key=section.section_key,
+            citation=section.citation,
+            title=section.title,
+            text=section.text,
+            order_index=index,
+        )
+        for index, section in enumerate(
+            sorted(
+                selected.values(),
+                key=lambda value: _section_order(
+                    _section_number(value.citation) or section_end
+                ),
+            )
+        )
+    ]
+
+
+def _parse_admin_xml_sections(
+    xml_content: bytes,
+    heading_pattern: re.Pattern[str],
+    *,
+    require_sections: bool = True,
+) -> list[ParsedSection]:
     root = ElementTree.fromstring(xml_content)
     sections: list[ParsedSection] = []
     for level in root.iter("LEVEL"):
         if level.attrib.get("style-name") != SECTION_STYLE_NAME:
             continue
         heading = normalized_element_text(level.find("./RECORD/HEADING"))
-        match = HMC_HEADING_PATTERN.match(heading)
+        match = heading_pattern.match(heading)
         if match is None:
             continue
         section_number = match.group("section_number").upper()
@@ -70,9 +146,20 @@ def parse_hmc_xml_sections(xml_content: bytes) -> list[ParsedSection]:
                 order_index=len(sections),
             )
         )
-    if not sections:
+    if not sections and require_sections:
         raise ValueError("AmLegal HMC XML did not contain citation-bearing sections.")
     return sections
+
+
+def _section_order(section_number: str) -> tuple[int, int, tuple[int, ...]]:
+    title, number = section_number.split("-", 1)
+    parts = number.split(".")
+    return int(title), int(parts[0]), tuple(int(part) for part in parts[1:])
+
+
+def _section_number(citation: str) -> str | None:
+    match = re.search(r"\b\d{2}-\d{3,5}(?:\.\d+)?\b", citation)
+    return match.group(0) if match else None
 
 
 def section_paragraphs(section_level: ElementTree.Element) -> list[str]:

@@ -11,7 +11,11 @@ from app.storage.database import (
     SchemaVersionError,
     _write_workspace_manifest,
 )
-from app.storage.schema import CORPUS_SCHEMA_VERSION, STATE_SCHEMA_VERSION
+from app.storage.schema import (
+    CORPUS_SCHEMA_VERSION,
+    STATE_SCHEMA_VERSION,
+    state_metadata,
+)
 from app.workspace.context import WorkspaceContext
 
 
@@ -20,7 +24,8 @@ class MigrationResult:
     status: str
     from_corpus_version: int
     to_corpus_version: int
-    state_version: int
+    from_state_version: int
+    to_state_version: int
     backup_path: str
 
     def as_dict(self) -> dict[str, object]:
@@ -40,7 +45,11 @@ def migration_preflight(context: WorkspaceContext) -> dict[str, object]:
         "state": STATE_SCHEMA_VERSION,
     }
     compatible = versions == supported
-    migration_available = versions == {"corpus": 1, "state": 1}
+    migration_available = versions in (
+        {"corpus": 1, "state": 1},
+        {"corpus": 1, "state": 2},
+        {"corpus": 2, "state": 1},
+    )
     if compatible:
         next_action = "No local schema migration is required."
     elif migration_available:
@@ -79,21 +88,33 @@ def migrate_workspace(context: WorkspaceContext) -> MigrationResult:
             "state": STATE_SCHEMA_VERSION,
         }:
             raise SchemaVersionError("Workspace already uses the current schema.")
-        if versions != {"corpus": 1, "state": 1}:
+        if versions not in (
+            {"corpus": 1, "state": 1},
+            {"corpus": 1, "state": 2},
+            {"corpus": 2, "state": 1},
+        ):
             raise SchemaVersionError(
                 f"No migration is available for schema versions {versions}."
             )
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup_path = context.paths.backups / f"pre-migration-v1-{timestamp}.zip"
+        from_corpus = int(versions["corpus"])
+        from_state = int(versions["state"])
+        backup_path = context.paths.backups / (
+            f"pre-migration-c{from_corpus}-s{from_state}-{timestamp}.zip"
+        )
         WorkspaceBackupService(storage).create(backup_path)
-        _migrate_corpus_v1_to_v2(storage)
+        if from_corpus == 1:
+            _migrate_corpus_v1_to_v2(storage)
+        if from_state == 1:
+            _migrate_state_v1_to_v2(storage)
         _write_workspace_manifest(context.paths)
         storage.assert_compatible()
         return MigrationResult(
             status="migrated",
-            from_corpus_version=1,
+            from_corpus_version=from_corpus,
             to_corpus_version=CORPUS_SCHEMA_VERSION,
-            state_version=STATE_SCHEMA_VERSION,
+            from_state_version=from_state,
+            to_state_version=STATE_SCHEMA_VERSION,
             backup_path=str(backup_path),
         )
     finally:
@@ -133,6 +154,38 @@ def _migrate_corpus_v1_to_v2(storage: LocalStorage) -> None:
             )
         for statement in statements:
             connection.exec_driver_sql(statement)
+        connection.execute(
+            text("UPDATE schema_metadata SET value = '2' WHERE key = 'version'")
+        )
+
+
+def _migrate_state_v1_to_v2(storage: LocalStorage) -> None:
+    with storage.state_engine.connect() as connection:
+        current = connection.scalar(
+            text("SELECT value FROM schema_metadata WHERE key = 'version'")
+        )
+    if current != "1":
+        raise SchemaVersionError(
+            f"State migration expected version 1, found {current!r}."
+        )
+    # Version 2 is additive. SQLAlchemy emits the reviewed table definitions and
+    # leaves all existing state tables and records untouched.
+    state_metadata.create_all(storage.state_engine)
+    with storage.state_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS matter_fts USING fts5(
+                    matter_id UNINDEXED,
+                    item_id UNINDEXED,
+                    title,
+                    body,
+                    tags,
+                    tokenize = 'unicode61 remove_diacritics 2'
+                )
+                """
+            )
+        )
         connection.execute(
             text("UPDATE schema_metadata SET value = '2' WHERE key = 'version'")
         )

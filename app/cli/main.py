@@ -22,6 +22,7 @@ from app.answer.evaluation import (
 from app.answer.local import LocalAnswerService
 from app.corpus.bundle import CanonicalBundleService
 from app.corpus.download import SourceDownloadError
+from app.corpus.packs import SourcePackService
 from app.corpus.resources import ResourceMetadata, ResourceService
 from app.corpus.service import CorpusService, CorpusValidationError, SourceArtifact
 from app.credentials.store import (
@@ -62,6 +63,7 @@ from app.maintenance.diagnostics import (
 )
 from app.maintenance.retention import RetentionError, WorkspaceRetentionService
 from app.maintenance.updates import UpdateCheckError, check_github_release
+from app.offline.service import OfflineExtensionError, OfflineExtensionService
 from app.providers.gateway import ProviderExecutionError, ProviderGateway
 from app.providers.profiles import (
     ProfileKind,
@@ -74,14 +76,16 @@ from app.providers.validation import (
     run_credential_validation,
     run_profile_compatibility_check,
 )
+from app.research.comparisons import ComparisonError, SourceComparisonService
+from app.research.matters import MatterError, MatterService
 from app.retrieval.benchmark import benchmark_as_dict, run_synthetic_benchmark
 from app.retrieval.evaluation import evaluate_retrieval, load_retrieval_cases
 from app.retrieval.local import LocalSearch, LocalSearchFilters
 from app.storage.database import LocalStorage, SchemaVersionError
 from app.storage.migrations import migrate_workspace, migration_preflight
 from app.usage.ledger import PaidCapacityUnavailable, SpendDenied, UsageLedger
-from app.workspace.context import WorkspaceContext
-from app.workspace.network import NetworkAccessDenied, NetworkPolicy
+from app.workspace.context import WorkspaceContext, network_policy_for_settings
+from app.workspace.network import NetworkAccessDenied
 from app.workspace.settings import LocalSettingsError, save_local_settings
 
 EXIT_INVALID_CONFIGURATION = 2
@@ -204,6 +208,29 @@ def build_parser() -> argparse.ArgumentParser:
     sources = commands.add_parser("sources", help="Show core source availability.")
     sources.add_argument("--json", action="store_true")
 
+    packs = commands.add_parser("packs", help="Manage optional source packs.")
+    pack_commands = packs.add_subparsers(dest="packs_command", required=True)
+    packs_list = pack_commands.add_parser("list", help="List available packs.")
+    packs_list.add_argument("--json", action="store_true")
+    for operation in ("install", "update", "check", "restore"):
+        pack_command = pack_commands.add_parser(
+            operation, help=f"{operation.title()} a source pack."
+        )
+        pack_command.add_argument("pack_id")
+        pack_command.add_argument("--module", action="append", dest="modules")
+        pack_command.add_argument("--json", action="store_true")
+    packs_remove = pack_commands.add_parser(
+        "remove", help="Preview or apply source-pack removal."
+    )
+    packs_remove.add_argument("pack_id")
+    packs_remove.add_argument("--module", action="append", dest="modules")
+    packs_remove.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply removal; without this flag only a preview is shown.",
+    )
+    packs_remove.add_argument("--json", action="store_true")
+
     corpus = commands.add_parser("corpus", help="Manage the local legal corpus.")
     corpus_commands = corpus.add_subparsers(dest="corpus_command", required=True)
     install = corpus_commands.add_parser("install", help="Install legal sources.")
@@ -229,6 +256,15 @@ def build_parser() -> argparse.ArgumentParser:
     activate.add_argument("--json", action="store_true")
     rollback = corpus_commands.add_parser("rollback", help="Restore prior generation.")
     rollback.add_argument("--json", action="store_true")
+    corpus_diff = corpus_commands.add_parser(
+        "diff", help="Compare two retained official source versions."
+    )
+    corpus_diff.add_argument("module_slug")
+    corpus_diff.add_argument("baseline_version_id")
+    corpus_diff.add_argument("target_version_id")
+    corpus_diff.add_argument("--include-unchanged", action="store_true")
+    corpus_diff.add_argument("--export", choices=["json", "markdown"])
+    corpus_diff.add_argument("--json", action="store_true")
 
     bundle = corpus_commands.add_parser(
         "bundle", help="Export, inspect, or import a data-only corpus bundle."
@@ -434,13 +470,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask.add_argument("question")
     ask.add_argument("--source")
-    ask.add_argument(
-        "--scope", choices=["official", "mine", "all"], default="official"
-    )
+    ask.add_argument("--scope", choices=["official", "mine", "all"], default="official")
     ask.add_argument("--limit", type=int, default=8)
     ask.add_argument("--deadline", type=float)
     ask.add_argument("--allow-unknown-cost", action="store_true")
+    ask.add_argument("--language", choices=["en", "es"])
+    ask.add_argument("--style", choices=["standard", "plain"])
     ask.add_argument("--json", action="store_true")
+
+    matters_command = commands.add_parser(
+        "matters", help="Organize explicitly saved local research."
+    )
+    matter_subcommands = matters_command.add_subparsers(
+        dest="matters_command", required=True
+    )
+    matter_list = matter_subcommands.add_parser("list")
+    matter_list.add_argument("--query")
+    matter_list.add_argument("--include-archived", action="store_true")
+    matter_list.add_argument("--json", action="store_true")
+    matter_create = matter_subcommands.add_parser("create")
+    matter_create.add_argument("title")
+    matter_create.add_argument("--description", default="")
+    matter_create.add_argument("--tag", action="append", default=[])
+    matter_create.add_argument("--json", action="store_true")
+    matter_show = matter_subcommands.add_parser("show")
+    matter_show.add_argument("matter_id")
+    matter_show.add_argument("--json", action="store_true")
+    matter_export = matter_subcommands.add_parser("export")
+    matter_export.add_argument("matter_id")
+    matter_export.add_argument("--json", action="store_true")
+    matter_delete = matter_subcommands.add_parser("delete")
+    matter_delete.add_argument("matter_id")
+    matter_delete.add_argument("--apply", action="store_true")
+    matter_delete.add_argument("--json", action="store_true")
+
+    offline_command = commands.add_parser(
+        "offline", help="Inspect independently verified offline capabilities."
+    )
+    offline_subcommands = offline_command.add_subparsers(
+        dest="offline_command", required=True
+    )
+    offline_status = offline_subcommands.add_parser("status")
+    offline_status.add_argument("--json", action="store_true")
 
     debug = commands.add_parser(
         "debug", help="Inspect a local operation without exposing credentials."
@@ -643,8 +714,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             from app.launcher import start_workspace
 
             return start_workspace(
-                context, skip_core=args.skip_core, setup_only=args.setup_only,
-                no_browser=args.no_browser, port=args.port,
+                context,
+                skip_core=args.skip_core,
+                setup_only=args.setup_only,
+                no_browser=args.no_browser,
+                port=args.port,
             )
         if args.command == "setup":
             return _setup(context, args)
@@ -658,6 +732,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _serve(context, args)
         if args.command == "sources":
             return _sources(context, as_json=args.json)
+        if args.command == "packs":
+            return _packs(context, args)
         if args.command == "corpus":
             return _corpus(context, args)
         if args.command == "search":
@@ -674,6 +750,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _usage(context, as_json=args.json)
         if args.command == "ask":
             return _ask(context, args)
+        if args.command == "matters":
+            return _matters(context, args)
+        if args.command == "offline":
+            return _offline(context, args)
         if args.command == "debug":
             return _debug_answer(context, args)
         if args.command == "property":
@@ -727,6 +807,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         RetentionError,
         LegacyExportError,
         UpdateCheckError,
+        MatterError,
+        ComparisonError,
+        OfflineExtensionError,
         ValueError,
     ) as exc:
         print(f"Operation failed: {exc}", file=sys.stderr)
@@ -786,7 +869,7 @@ def _context(args: argparse.Namespace, *, initialize: bool) -> WorkspaceContext:
     context = replace(
         context,
         settings=settings.validate(),
-        network=NetworkPolicy(offline=settings.offline),
+        network=network_policy_for_settings(settings),
     )
     if initialize:
         context.initialize()
@@ -1070,11 +1153,74 @@ def _sources(context: WorkspaceContext, *, as_json: bool) -> int:
         storage.close()
 
 
+def _packs(context: WorkspaceContext, args: argparse.Namespace) -> int:
+    storage = _initialized_storage(context)
+    try:
+        packs = SourcePackService(CorpusService(storage))
+        command = args.packs_command
+        if command == "list":
+            _write({"source_packs": packs.list()}, as_json=args.json)
+            return 0
+        modules = packs.module_slugs(args.pack_id, args.modules)
+        if command == "remove" and not args.apply:
+            _write(
+                packs.removal_preview(args.pack_id, modules),
+                as_json=args.json,
+            )
+            return 0
+        runner = CorpusMaintenanceJobs(context, storage)
+        try:
+            job = runner.submit(
+                command,
+                sources=modules,
+                pack_id=args.pack_id,
+                allow_partial=True,
+            )
+            completed = runner.wait(job.id)
+        finally:
+            runner.close()
+        if completed.state.value != "succeeded":
+            raise SourceDownloadError(
+                completed.error_message or "Source-pack operation failed."
+            )
+        _write(
+            {
+                "status": "succeeded",
+                "operation": command,
+                "pack_id": args.pack_id,
+                "modules": modules,
+                "job_id": job.id,
+                "generation_id": completed.resume.get("generation_id"),
+                "pack": packs.get(args.pack_id),
+            },
+            as_json=args.json,
+        )
+        return 0
+    finally:
+        storage.close()
+
+
 def _corpus(context: WorkspaceContext, args: argparse.Namespace) -> int:
     storage = _initialized_storage(context)
     try:
         service = CorpusService(storage)
         command = args.corpus_command
+        if command == "diff":
+            comparisons = SourceComparisonService(storage)
+            result = comparisons.create(
+                args.module_slug,
+                args.baseline_version_id,
+                args.target_version_id,
+            )
+            if args.include_unchanged:
+                result = comparisons.get(result["id"], include_unchanged=True)
+            if args.export:
+                path = comparisons.export(
+                    result["id"], context.paths.exports, format=args.export
+                )
+                result["export_path"] = str(path)
+            _write(result, as_json=args.json)
+            return 0
         if command in {"install", "update"}:
             source = None if command == "install" else args.source
             runner = CorpusMaintenanceJobs(context, storage)
@@ -1344,9 +1490,7 @@ def _resources(context: WorkspaceContext, args: argparse.Namespace) -> int:
     try:
         command = args.resources_command
         if command == "list":
-            payload = {
-                "resources": service.list(include_removed=not args.active_only)
-            }
+            payload = {"resources": service.list(include_removed=not args.active_only)}
         elif command == "show":
             payload = service.get(args.resource_id)
             payload["preview"] = service.preview_chunks(args.resource_id)
@@ -1488,6 +1632,9 @@ def _jobs(context: WorkspaceContext, args: argparse.Namespace) -> int:
             if record.job_type in {
                 "corpus_install",
                 "corpus_update",
+                "corpus_check",
+                "corpus_remove",
+                "corpus_restore",
                 "corpus_index",
             }:
                 runner = CorpusMaintenanceJobs(context, storage)
@@ -1828,6 +1975,8 @@ def _ask(context: WorkspaceContext, args: argparse.Namespace) -> int:
             deadline=Deadline.after(deadline_seconds),
             operation_id=job.id,
             allow_unknown_cost=args.allow_unknown_cost,
+            answer_language=args.language,
+            reading_style=args.style,
         )
         jobs_service.succeed(job.id, worker_id)
         payload = asdict(result)
@@ -1845,6 +1994,44 @@ def _ask(context: WorkspaceContext, args: argparse.Namespace) -> int:
         raise
     finally:
         gateway.close()
+        storage.close()
+
+
+def _matters(context: WorkspaceContext, args: argparse.Namespace) -> int:
+    storage = _initialized_storage(context)
+    service = MatterService(storage)
+    try:
+        if args.matters_command == "list":
+            payload: object = {
+                "matters": service.list(
+                    query=args.query,
+                    include_archived=args.include_archived,
+                )
+            }
+        elif args.matters_command == "create":
+            payload = service.create(
+                args.title, description=args.description, tags=args.tag
+            )
+        elif args.matters_command == "show":
+            payload = service.get(args.matter_id)
+        elif args.matters_command == "export":
+            path = service.export(args.matter_id, context.paths.exports)
+            payload = {"path": str(path), "filename": path.name}
+        else:
+            payload = service.delete(args.matter_id, apply=args.apply)
+        _write(payload, as_json=args.json)
+        return 0
+    finally:
+        storage.close()
+
+
+def _offline(context: WorkspaceContext, args: argparse.Namespace) -> int:
+    storage = _initialized_storage(context)
+    try:
+        payload = OfflineExtensionService(context, storage).readiness()
+        _write(payload, as_json=args.json)
+        return 0
+    finally:
         storage.close()
 
 

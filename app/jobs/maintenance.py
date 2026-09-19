@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from app.corpus.download import download_source_artifacts
 from app.corpus.indexing import CorpusEmbeddingIndexer, IndexingEstimate
-from app.corpus.manifests import load_core_manifests
+from app.corpus.manifests import load_all_manifests
 from app.corpus.service import CorpusService, CorpusValidationError, SourceArtifact
 from app.credentials.store import CredentialResolver
 from app.jobs.runtime import OperationCancelled
@@ -54,9 +54,7 @@ class CorpusMaintenanceJobs:
         self._lock = threading.Lock()
 
     def estimate_index(self) -> tuple[IndexingEstimate, bool, str | None]:
-        profile = get_configured_profile(
-            self._context.settings, ProfileKind.EMBEDDING
-        )
+        profile = get_configured_profile(self._context.settings, ProfileKind.EMBEDDING)
         if not profile.compatibility_verified:
             raise ValueError(
                 "The custom embedding endpoint must pass `profiles check embedding` "
@@ -81,6 +79,8 @@ class CorpusMaintenanceJobs:
         operation: str,
         *,
         source: str | None = None,
+        sources: list[str] | None = None,
+        pack_id: str | None = None,
         allow_partial: bool = False,
         approve_cost: bool = False,
         max_cost_usd: Decimal | None = None,
@@ -89,10 +89,12 @@ class CorpusMaintenanceJobs:
         resume: dict[str, object] = {
             "operation": operation,
             "source": source,
+            "sources": sources,
+            "pack_id": pack_id,
             "allow_partial": allow_partial,
         }
         if operation == "index":
-            if source is not None:
+            if source is not None or sources is not None or pack_id is not None:
                 raise ValueError("Corpus indexing does not accept a source filter.")
             if not 1 <= batch_size <= 128:
                 raise ValueError("Embedding batch size must be between 1 and 128.")
@@ -131,7 +133,12 @@ class CorpusMaintenanceJobs:
                 "chunks_requiring_embedding": estimate.chunks_requiring_embedding,
             }
         else:
-            _operation_slugs(operation, source)
+            selected = _operation_slugs(operation, source, sources)
+            manifests = load_all_manifests()
+            if selected and all(
+                manifests[slug].role == "optional" for slug in selected
+            ):
+                resume["allow_partial"] = True
         job = self._jobs.create(
             f"corpus_{operation}",
             "corpus:core",
@@ -190,14 +197,44 @@ class CorpusMaintenanceJobs:
             source = record.resume.get("source")
             if source is not None and not isinstance(source, str):
                 raise ValueError("Corpus job source state is invalid.")
-            if source is None:
+            raw_sources = record.resume.get("sources")
+            if raw_sources is not None and (
+                not isinstance(raw_sources, list)
+                or not all(isinstance(item, str) for item in raw_sources)
+            ):
+                raise ValueError("Corpus job source selection is invalid.")
+            if source is None and raw_sources is None:
                 source = _job_source(record)
-            slugs = _operation_slugs(operation, source)
+            slugs = _operation_slugs(operation, source, raw_sources)
             base_resume = {
                 "operation": operation,
                 "source": source,
+                "sources": raw_sources,
+                "pack_id": record.resume.get("pack_id"),
                 "allow_partial": record.resume.get("allow_partial") is True,
             }
+
+            if operation in {"remove", "restore"}:
+                if slugs is None:
+                    raise ValueError(
+                        "Pack lifecycle operation requires source modules."
+                    )
+                corpus = CorpusService(storage)
+                generation_id = (
+                    corpus.remove_sources(slugs)
+                    if operation == "remove"
+                    else corpus.restore_sources(slugs)
+                )
+                jobs.checkpoint(
+                    job_id,
+                    worker_id,
+                    stage="activated",
+                    current=len(slugs),
+                    total=len(slugs),
+                    resume=base_resume | {"generation_id": generation_id},
+                )
+                jobs.succeed(job_id, worker_id)
+                return
 
             def progress(message: str) -> None:
                 if jobs.get(job_id).state == JobState.CANCEL_REQUESTED:
@@ -222,6 +259,18 @@ class CorpusMaintenanceJobs:
             )
             if jobs.get(job_id).state == JobState.CANCEL_REQUESTED:
                 raise OperationCancelled("Corpus operation was cancelled.")
+            if operation == "check":
+                check_result = CorpusService(storage).check_artifacts(artifacts)
+                jobs.checkpoint(
+                    job_id,
+                    worker_id,
+                    stage="checked",
+                    current=len(artifacts),
+                    total=len(artifacts),
+                    resume=base_resume | {"check_result": check_result},
+                )
+                jobs.succeed(job_id, worker_id)
+                return
             jobs.checkpoint(
                 job_id,
                 worker_id,
@@ -290,9 +339,7 @@ class CorpusMaintenanceJobs:
         profile_id = record.resume.get("profile_id")
         if not isinstance(profile_id, str):
             raise ValueError("Corpus indexing profile state is missing.")
-        profile = get_configured_profile(
-            self._context.settings, ProfileKind.EMBEDDING
-        )
+        profile = get_configured_profile(self._context.settings, ProfileKind.EMBEDDING)
         if profile.id != profile_id:
             raise ValueError(
                 "The embedding profile configuration changed after this job was "
@@ -398,15 +445,32 @@ def job_payload(record: JobRecord) -> dict[str, object]:
     return payload
 
 
-def _operation_slugs(operation: str, source: str | None) -> list[str] | None:
-    if operation not in {"install", "update"}:
-        raise ValueError("Corpus operation must be install or update.")
-    manifests = load_core_manifests()
+def _operation_slugs(
+    operation: str,
+    source: str | None,
+    sources: list[str] | None = None,
+) -> list[str] | None:
+    if operation not in {"install", "update", "check", "remove", "restore"}:
+        raise ValueError(
+            "Corpus operation must be install, update, check, remove, or restore."
+        )
+    if source is not None and sources is not None:
+        raise ValueError("Use either source or sources, not both.")
+    manifests = load_all_manifests()
     if source is not None and source not in manifests:
         raise ValueError(f"Unknown source: {source}")
-    if operation == "install" and source is not None:
+    if sources is not None:
+        sources = list(dict.fromkeys(sources))
+        if not sources:
+            raise ValueError("Select at least one source.")
+        unknown = sorted(set(sources) - set(manifests))
+        if unknown:
+            raise ValueError("Unknown source(s): " + ", ".join(unknown))
+    if operation == "install" and source is not None and sources is None:
         raise ValueError("Core install does not accept a single source.")
-    return [source] if source else None
+    if operation in {"remove", "restore"} and sources is None:
+        raise ValueError("Pack lifecycle operation requires selected modules.")
+    return sources if sources is not None else ([source] if source else None)
 
 
 def _job_operation(record: JobRecord) -> str:
@@ -416,7 +480,7 @@ def _job_operation(record: JobRecord) -> str:
             "Only corpus install/update/index jobs can be resumed from this runner."
         )
     operation = record.job_type.removeprefix(prefix)
-    if operation not in {"install", "update", "index"}:
+    if operation not in {"install", "update", "check", "remove", "restore", "index"}:
         raise InvalidJobTransition("Corpus job operation is invalid.")
     return operation
 

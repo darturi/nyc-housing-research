@@ -27,6 +27,50 @@ STOP_WORDS = {
 
 DOMAIN_EXPANSIONS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
     (
+        re.compile(
+            r"alquiler|renta|inquilin[oa]s?|caser[oa]|arrendador|"
+            r"apartamento|vivienda",
+            re.IGNORECASE,
+        ),
+        ("rent", "tenant", "landlord", "apartment", "housing"),
+    ),
+    (
+        re.compile(r"calefacci[oó]n|agua caliente|temperatura", re.IGNORECASE),
+        ("heat", "hot", "water", "temperature", "minimum"),
+    ),
+    (
+        re.compile(
+            r"desalojo|evicci[oó]n|tribunal de vivienda|falta de pago|demanda",
+            re.IGNORECASE,
+        ),
+        ("eviction", "housing court", "nonpayment", "rent demand", "RPAPL"),
+    ),
+    (
+        re.compile(r"reparaci[oó]n|mantenimiento|condiciones|queja", re.IGNORECASE),
+        ("repair", "maintenance", "conditions", "complaint", "inspection"),
+    ),
+    (
+        re.compile(r"renta estabilizada|estabilizaci[oó]n de renta", re.IGNORECASE),
+        ("rent stabilization", "rent stabilized", "DHCR", "lease renewal"),
+    ),
+    (
+        re.compile(
+            r"rent[-\s]?stabili[sz]|\bDHCR\b|renewal\s+lease|"
+            r"preferential\s+rent|succession\s+rights",
+            re.IGNORECASE,
+        ),
+        (
+            "rent",
+            "stabilization",
+            "stabilized",
+            "DHCR",
+            "lease",
+            "renewal",
+            "preferential",
+            "succession",
+        ),
+    ),
+    (
         re.compile(r"\bheat\b|hot\s+water|temperature", re.IGNORECASE),
         (
             "heat",
@@ -62,8 +106,14 @@ DOMAIN_EXPANSIONS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
             re.IGNORECASE,
         ),
         (
-            "nonpayment", "rent", "demand", "fourteen-day", "holdover",
-            "acceptance", "RPAPL", "Real Property Law",
+            "nonpayment",
+            "rent",
+            "demand",
+            "fourteen-day",
+            "holdover",
+            "acceptance",
+            "RPAPL",
+            "Real Property Law",
         ),
     ),
     (
@@ -97,6 +147,32 @@ DOMAIN_EXPANSIONS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
 )
 
 FOCUSED_QUERY_TEXTS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
+    (
+        re.compile(r"calefacci[oó]n|agua caliente|temperatura", re.IGNORECASE),
+        ("minimum temperature heat", "hot water"),
+    ),
+    (
+        re.compile(
+            r"desalojo|evicci[oó]n|tribunal de vivienda|falta de pago",
+            re.IGNORECASE,
+        ),
+        ("RPAPL eviction nonpayment", "housing court rent demand"),
+    ),
+    (
+        re.compile(r"renta estabilizada|estabilizaci[oó]n de renta", re.IGNORECASE),
+        ("NYC Admin Code 26-501 rent stabilization", "DHCR rent stabilized"),
+    ),
+    (
+        re.compile(
+            r"rent[-\s]?stabili[sz]|\bDHCR\b|renewal\s+lease|"
+            r"preferential\s+rent|succession\s+rights",
+            re.IGNORECASE,
+        ),
+        (
+            "NYC Admin Code 26-501 rent stabilization",
+            "DHCR rent stabilized lease renewal succession preferential rent",
+        ),
+    ),
     (
         re.compile(r"\bheat\b|hot\s+water|temperature", re.IGNORECASE),
         ("temperature", "minimum temperature", "heat"),

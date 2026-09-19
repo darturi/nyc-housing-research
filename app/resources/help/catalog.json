@@ -1,0 +1,193 @@
+{
+  "format_version": 1,
+  "catalog_version": "2026-09-19.1",
+  "source_checked_at": "2026-09-19",
+  "editorial_status": "source_verified_review_pending",
+  "reviewer_role": "housing-services reviewer pending",
+  "next_review_date": "2026-10-19",
+  "cards": [
+    {
+      "id": "nyc-immediate-danger-en",
+      "topic": "danger",
+      "priority": 100,
+      "geography": "NYC",
+      "housing_contexts": ["any"],
+      "language": "en",
+      "title": "Immediate danger, fire, smoke, or fumes",
+      "body": "If there is an immediate threat to life or safety, or fire, smoke, or dangerous fumes, use emergency services. This card does not decide whether your situation is an emergency.",
+      "actions": [
+        {"type": "telephone", "label": "Call 911", "destination": "911"},
+        {"type": "official_link", "label": "Open NYC311 boiler safety guidance", "destination": "https://portal.311.nyc.gov/article/?kanumber=KA-02047"}
+      ],
+      "sources": ["https://portal.311.nyc.gov/article/?kanumber=KA-02047"]
+    },
+    {
+      "id": "nyc-lockout-en",
+      "topic": "lockout",
+      "priority": 90,
+      "geography": "NYC",
+      "housing_contexts": ["private", "nycha", "unknown"],
+      "language": "en",
+      "title": "Locked out of your home",
+      "body": "NYC's official lockout page directs people reporting a current lockout to call 911, then call 311 and ask for the Tenant Helpline. It also describes Housing Court steps. The app is only linking that guidance; it is not deciding legal status.",
+      "actions": [
+        {"type": "telephone", "label": "Call 911", "destination": "911"},
+        {"type": "telephone", "label": "Call 311 and ask for the Tenant Helpline", "destination": "311"},
+        {"type": "official_link", "label": "Read NYC eviction and lockout resources", "destination": "https://www.nyc.gov/site/mayorspeu/programs/eviction-protection-resources.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/mayorspeu/programs/eviction-protection-resources.page"]
+    },
+    {
+      "id": "nyc-essential-services-en",
+      "topic": "essential_services",
+      "priority": 80,
+      "geography": "NYC",
+      "housing_contexts": ["private", "unknown"],
+      "language": "en",
+      "title": "Heat, hot water, or essential-service problem",
+      "body": "NYC311 has official reporting guidance for residential heat, hot water, and other apartment maintenance problems. The page explains what information a complaint may require and links separate NYCHA reporting options.",
+      "actions": [
+        {"type": "telephone", "label": "Call 311", "destination": "311"},
+        {"type": "official_link", "label": "Open heat and hot water complaint guidance", "destination": "https://portal.311.nyc.gov/article/?kanumber=KA-01036"},
+        {"type": "official_link", "label": "Open apartment maintenance guidance", "destination": "https://portal.311.nyc.gov/article/?kanumber=KA-01074"}
+      ],
+      "sources": ["https://portal.311.nyc.gov/article/?kanumber=KA-01036", "https://portal.311.nyc.gov/article/?kanumber=KA-01074"]
+    },
+    {
+      "id": "nycha-essential-services-en",
+      "topic": "essential_services",
+      "priority": 82,
+      "geography": "NYC",
+      "housing_contexts": ["nycha"],
+      "language": "en",
+      "title": "NYCHA maintenance or essential-service problem",
+      "body": "NYCHA lists its Customer Contact Center as a point of contact for public-housing residents and says the center and MyNYCHA are available 24/7. Verify current details on the official page.",
+      "actions": [
+        {"type": "telephone", "label": "Call NYCHA Customer Contact Center", "destination": "7187077771"},
+        {"type": "official_link", "label": "Open NYCHA contact information", "destination": "https://www.nyc.gov/site/nycha/about/contact.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/nycha/about/contact.page"]
+    },
+    {
+      "id": "nyc-eviction-court-en",
+      "topic": "eviction_court",
+      "priority": 75,
+      "geography": "NYC",
+      "housing_contexts": ["private", "nycha", "unknown"],
+      "language": "en",
+      "title": "Eviction or Housing Court help",
+      "body": "NYC HRA describes free legal services for tenants facing eviction in Housing Court or NYCHA administrative proceedings. Service availability and the help appropriate to a case must be confirmed with the provider.",
+      "actions": [
+        {"type": "telephone", "label": "Call 311 and ask for the Tenant Helpline", "destination": "311"},
+        {"type": "official_link", "label": "Open HRA legal services for tenants", "destination": "https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"]
+    },
+    {
+      "id": "nyc-housing-legal-help-en",
+      "topic": "legal_help",
+      "priority": 60,
+      "geography": "NYC",
+      "housing_contexts": ["any"],
+      "language": "en",
+      "title": "Housing legal assistance",
+      "body": "NYC HRA lists tenant legal-service entry points, including the Tenant Helpline through 311. The provider determines eligibility and the assistance available.",
+      "actions": [
+        {"type": "telephone", "label": "Call 311 and ask for the Tenant Helpline", "destination": "311"},
+        {"type": "official_link", "label": "Open HRA legal services for tenants", "destination": "https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"]
+    },
+    {
+      "id": "nyc-immediate-danger-es",
+      "topic": "danger",
+      "priority": 100,
+      "geography": "NYC",
+      "housing_contexts": ["any"],
+      "language": "es",
+      "title": "Peligro inmediato, incendio, humo o gases",
+      "body": "Si existe una amenaza inmediata para la vida o la seguridad, o hay incendio, humo o gases peligrosos, use los servicios de emergencia. Esta tarjeta no determina si su situación es una emergencia.",
+      "actions": [
+        {"type": "telephone", "label": "Llame al 911", "destination": "911"},
+        {"type": "official_link", "label": "Abra la guía oficial de NYC311", "destination": "https://portal.311.nyc.gov/article/?kanumber=KA-02047"}
+      ],
+      "sources": ["https://portal.311.nyc.gov/article/?kanumber=KA-02047"]
+    },
+    {
+      "id": "nyc-lockout-es",
+      "topic": "lockout",
+      "priority": 90,
+      "geography": "NYC",
+      "housing_contexts": ["private", "nycha", "unknown"],
+      "language": "es",
+      "title": "No puede entrar a su vivienda",
+      "body": "La página oficial de NYC sobre desalojos sin orden dirige a las personas que reportan un cierre actual a llamar al 911 y después al 311 para pedir la Línea de Ayuda para Inquilinos. La aplicación solo enlaza esa guía y no decide la situación legal.",
+      "actions": [
+        {"type": "telephone", "label": "Llame al 911", "destination": "911"},
+        {"type": "telephone", "label": "Llame al 311 y pida la Línea de Ayuda para Inquilinos", "destination": "311"},
+        {"type": "official_link", "label": "Lea los recursos oficiales de NYC", "destination": "https://www.nyc.gov/site/mayorspeu/programs/eviction-protection-resources.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/mayorspeu/programs/eviction-protection-resources.page"]
+    },
+    {
+      "id": "nyc-essential-services-es",
+      "topic": "essential_services",
+      "priority": 80,
+      "geography": "NYC",
+      "housing_contexts": ["private", "unknown"],
+      "language": "es",
+      "title": "Problema de calefacción, agua caliente o servicios esenciales",
+      "body": "NYC311 ofrece guía oficial para reportar problemas de calefacción, agua caliente y mantenimiento residencial. La página explica la información requerida y enlaza opciones separadas para NYCHA.",
+      "actions": [
+        {"type": "telephone", "label": "Llame al 311", "destination": "311"},
+        {"type": "official_link", "label": "Abra la guía de calefacción y agua caliente", "destination": "https://portal.311.nyc.gov/article/?kanumber=KA-01036"}
+      ],
+      "sources": ["https://portal.311.nyc.gov/article/?kanumber=KA-01036"]
+    },
+    {
+      "id": "nycha-essential-services-es",
+      "topic": "essential_services",
+      "priority": 82,
+      "geography": "NYC",
+      "housing_contexts": ["nycha"],
+      "language": "es",
+      "title": "Problema de mantenimiento o servicio esencial de NYCHA",
+      "body": "NYCHA indica que su Centro de Contacto atiende a residentes de vivienda pública y que el centro y MyNYCHA están disponibles las 24 horas. Confirme los detalles actuales en la página oficial.",
+      "actions": [
+        {"type": "telephone", "label": "Llame al Centro de Contacto de NYCHA", "destination": "7187077771"},
+        {"type": "official_link", "label": "Abra la información de contacto de NYCHA", "destination": "https://www.nyc.gov/site/nycha/about/contact.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/nycha/about/contact.page"]
+    },
+    {
+      "id": "nyc-eviction-court-es",
+      "topic": "eviction_court",
+      "priority": 75,
+      "geography": "NYC",
+      "housing_contexts": ["private", "nycha", "unknown"],
+      "language": "es",
+      "title": "Ayuda con desalojo o el Tribunal de Vivienda",
+      "body": "HRA de NYC describe servicios legales gratuitos para inquilinos que enfrentan un desalojo en el Tribunal de Vivienda o procedimientos administrativos de NYCHA. Confirme la disponibilidad con el proveedor.",
+      "actions": [
+        {"type": "telephone", "label": "Llame al 311 y pida la Línea de Ayuda para Inquilinos", "destination": "311"},
+        {"type": "official_link", "label": "Abra los servicios legales de HRA", "destination": "https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"]
+    },
+    {
+      "id": "nyc-housing-legal-help-es",
+      "topic": "legal_help",
+      "priority": 60,
+      "geography": "NYC",
+      "housing_contexts": ["any"],
+      "language": "es",
+      "title": "Asistencia legal de vivienda",
+      "body": "HRA de NYC enumera puntos de acceso a servicios legales para inquilinos, incluida la Línea de Ayuda para Inquilinos por medio del 311. El proveedor determina la elegibilidad y la ayuda disponible.",
+      "actions": [
+        {"type": "telephone", "label": "Llame al 311 y pida la Línea de Ayuda para Inquilinos", "destination": "311"},
+        {"type": "official_link", "label": "Abra los servicios legales de HRA", "destination": "https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"}
+      ],
+      "sources": ["https://www.nyc.gov/site/hra/help/legal-services-for-tenants.page"]
+    }
+  ]
+}

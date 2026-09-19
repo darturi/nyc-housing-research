@@ -32,6 +32,9 @@ ACTIVE_TARGET_STATES = {
 RESUMABLE_JOB_TYPES = {
     "corpus_install",
     "corpus_update",
+    "corpus_check",
+    "corpus_remove",
+    "corpus_restore",
     "corpus_index",
     "property_complete_export",
     "resource_add",

@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
+from urllib.parse import urlsplit
 
 import httpx
 
-from app.corpus.manifests import SourceManifest, load_core_manifests
+from app.corpus.manifests import SourceManifest, load_all_manifests, load_core_manifests
 from app.corpus.service import SourceArtifact
 from app.ingestion.hpd_guidance import (
     HpdGuidancePage,
@@ -46,8 +47,8 @@ def download_source_artifacts(
     progress: Callable[[str], None] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> list[SourceArtifact]:
-    manifests = load_core_manifests()
-    requested = list(manifests) if slugs is None else list(slugs)
+    manifests = load_all_manifests()
+    requested = list(load_core_manifests()) if slugs is None else list(slugs)
     unknown = sorted(set(requested) - set(manifests))
     if unknown:
         raise SourceDownloadError("Unknown source(s): " + ", ".join(unknown))
@@ -65,6 +66,8 @@ def download_source_artifacts(
                 progress(f"Downloading source {index}/{len(requested)}: {slug}")
             if manifest.parser == "hpd_guidance_bundle":
                 artifacts.append(_download_guidance(context, client, manifest))
+            elif manifest.parser == "curated_guidance_bundle":
+                artifacts.append(_download_curated_guidance(context, client, manifest))
             else:
                 prior = prior_downloads.get(slug)
                 headers = _conditional_headers(prior)
@@ -117,6 +120,61 @@ def _download_guidance(
             HpdGuidancePage(
                 url=str(response.url),
                 title=extract_guidance_title(html, url),
+                html=html,
+            )
+        )
+    content = hpd_guidance_bundle_bytes(pages)
+    return SourceArtifact(
+        slug=manifest.slug,
+        content=content,
+        source_url=manifest.source_url,
+        content_type="application/json",
+        retrieved_at=datetime.now(UTC),
+    )
+
+
+def _download_curated_guidance(
+    context: WorkspaceContext,
+    client: httpx.Client,
+    manifest: SourceManifest,
+) -> SourceArtifact:
+    raw_urls = manifest.raw.get("document_urls")
+    if not isinstance(raw_urls, list) or not raw_urls:
+        raise SourceDownloadError(
+            f"Source {manifest.slug} has no curated document URLs."
+        )
+    expected_host = urlsplit(manifest.source_url).hostname
+    pages: list[HpdGuidancePage] = []
+    for raw_url in raw_urls:
+        if not isinstance(raw_url, str):
+            raise SourceDownloadError(
+                f"Source {manifest.slug} has an invalid document URL."
+            )
+        parsed = urlsplit(raw_url)
+        if parsed.scheme != "https" or parsed.hostname != expected_host:
+            raise SourceDownloadError(
+                f"Source {manifest.slug} document URL is outside its publisher host."
+            )
+        response = _get(context, client, raw_url, purpose=manifest.slug)
+        if urlsplit(str(response.url)).hostname != expected_host:
+            raise SourceDownloadError(
+                f"Source {manifest.slug} redirected outside its publisher host."
+            )
+        content_type = _content_type(response) or ""
+        looks_like_html = (
+            response.content.lstrip().lower().startswith((b"<!doctype html", b"<html"))
+        )
+        if "html" not in content_type.lower() and not looks_like_html:
+            raise SourceDownloadError(
+                f"Source {manifest.slug} returned a non-HTML guidance document."
+            )
+        html = response.content.decode("utf-8", errors="replace")
+        pages.append(
+            HpdGuidancePage(
+                url=str(response.url),
+                title=extract_guidance_title(html, raw_url)
+                .split(" | Homes and Community Renewal", 1)[0]
+                .strip(),
                 html=html,
             )
         )

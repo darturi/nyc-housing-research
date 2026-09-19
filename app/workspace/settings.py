@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import tempfile
@@ -8,6 +9,7 @@ from dataclasses import asdict, dataclass, field, fields
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.providers.profiles import (
@@ -45,6 +47,11 @@ class LocalSettings:
     operational_retention_days: int = 30
     usage_retention_months: int = 12
     history_enabled: bool = False
+    ui_locale: str = "en"
+    answer_language: str = "en"
+    reading_style: str = "standard"
+    local_runtime_enabled: bool = False
+    local_runtime_endpoint: str | None = None
     answer_profile: str = "fake-answer-small"
     embedding_profile: str = "fake-small-16"
     profile_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -101,6 +108,37 @@ class LocalSettings:
             raise LocalSettingsError(
                 "usage_retention_months must be between 1 and 120."
             )
+        if self.ui_locale not in {"en", "es"}:
+            raise LocalSettingsError("ui_locale must be en or es.")
+        if self.answer_language not in {"en", "es"}:
+            raise LocalSettingsError("answer_language must be en or es.")
+        if self.reading_style not in {"standard", "plain"}:
+            raise LocalSettingsError("reading_style must be standard or plain.")
+        if self.local_runtime_enabled:
+            if not self.local_runtime_endpoint:
+                raise LocalSettingsError(
+                    "local_runtime_endpoint is required when the runtime is enabled."
+                )
+            parsed = urlsplit(self.local_runtime_endpoint)
+            try:
+                literal_loopback = bool(
+                    parsed.hostname
+                    and ipaddress.ip_address(parsed.hostname).is_loopback
+                )
+            except ValueError:
+                literal_loopback = False
+            if (
+                parsed.scheme != "http"
+                or not literal_loopback
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise LocalSettingsError(
+                    "The local runtime must use an exact HTTP endpoint on a literal "
+                    "loopback address, without credentials, query, or fragment."
+                )
         try:
             get_profile(self.answer_profile, kind=ProfileKind.ANSWER)
             get_profile(self.embedding_profile, kind=ProfileKind.EMBEDDING)

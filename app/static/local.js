@@ -7,7 +7,34 @@ let activePropertyExportJobId = null;
 let selectedCredentialSlot = "openai";
 let selectedCredentialIsCustom = false;
 let selectedAnswerPricingVerified = true;
+let currentLocale = document.documentElement.lang || "en";
+let matterCache = [];
 const byId = (id) => document.getElementById(id);
+
+async function applyLocale(locale, {persist = false} = {}) {
+  const response = await fetch(`/api/v1/locales/${encodeURIComponent(locale)}`);
+  if (!response.ok) throw new Error("Could not load the interface language.");
+  const catalog = await response.json();
+  currentLocale = catalog.locale;
+  document.documentElement.lang = currentLocale;
+  byId("ui-locale").value = currentLocale;
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    const translated = catalog.messages[element.dataset.i18n];
+    if (translated) element.textContent = translated;
+  });
+  if (persist && csrfToken) {
+    await api("/api/v1/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ui_locale: currentLocale}),
+    });
+  }
+}
+
+byId("ui-locale").addEventListener("change", (event) => {
+  applyLocale(event.target.value, {persist: true}).catch((error) => {
+    byId("launch-status").textContent = error.message;
+  });
+});
 
 function formatMoney(value) {
   const amount = Number(value);
@@ -95,6 +122,7 @@ async function showApplication() {
     loadSettings(),
     loadUsage(),
     loadWorkspaceStatus(),
+    loadMatters(),
   ]);
   if (!status.legal_corpus.active_generation_id) selectView("sources");
 }
@@ -145,6 +173,11 @@ byId("research-form").addEventListener("submit", async (event) => {
   target.textContent = "Retrieving public sources…";
   try {
     const selectedMode = byId("research-mode").value;
+    const help = await api("/api/v1/help-resources/match", {
+      method: "POST",
+      body: JSON.stringify({question, language: currentLocale}),
+    });
+    renderHelpResources(help);
     if (["auto", "property"].includes(selectedMode)) {
       const route = await api("/api/v1/route", {
         method: "POST",
@@ -184,6 +217,8 @@ byId("research-form").addEventListener("submit", async (event) => {
           scope,
           ...(source ? {source} : {}),
           ...(allowUnknownCost ? {allow_unknown_cost: true} : {}),
+          answer_language: byId("answer-language").value,
+          reading_style: byId("reading-style").value,
         }),
       });
       activeAnswerJobId = created.job_id;
@@ -428,6 +463,37 @@ function renderAnswer(target, result) {
     button.addEventListener("click", () => exportAnswer(format));
     actions.append(button);
   });
+  if (lastAnswerJobId && matterCache.length) {
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Matter for saved answer");
+    matterCache.forEach((matter) => {
+      const option = document.createElement("option");
+      option.value = matter.id;
+      option.textContent = matter.title;
+      select.append(option);
+    });
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "secondary-button";
+    save.textContent = "Save answer to matter";
+    save.addEventListener("click", async () => {
+      try {
+        await api(`/api/v1/matters/${encodeURIComponent(select.value)}/items`, {
+          method: "POST",
+          body: JSON.stringify({
+            job_id: lastAnswerJobId,
+            idempotency_key: crypto.randomUUID(),
+          }),
+        });
+        save.textContent = "Saved to matter";
+        save.disabled = true;
+        await loadMatters();
+      } catch (error) {
+        save.textContent = error.message;
+      }
+    });
+    actions.append(select, save);
+  }
   if (result.status === "provider_error") {
     const retry = document.createElement("button");
     retry.type = "button";
@@ -721,6 +787,13 @@ async function loadSources() {
   allSources.textContent = "All installed sources";
   filter.append(allSources);
   body.sources.forEach((source) => {
+    if (source.installed) {
+      const option = document.createElement("option");
+      option.value = source.slug;
+      option.textContent = source.name;
+      filter.append(option);
+    }
+    if (source.role === "optional") return;
     const item = document.createElement("li");
     item.className = "citation-item";
     const title = document.createElement("strong");
@@ -746,14 +819,78 @@ async function loadSources() {
     });
     item.append(update);
     list.append(item);
-    if (source.installed) {
-      const option = document.createElement("option");
-      option.value = source.slug;
-      option.textContent = source.name;
-      filter.append(option);
-    }
   });
+  renderSourcePacks(body.source_packs || []);
   renderResources(body.resources || [], filter);
+}
+
+function renderSourcePacks(packs) {
+  const list = byId("source-pack-list");
+  list.replaceChildren();
+  packs.forEach((pack) => {
+    const item = document.createElement("li");
+    item.className = "citation-item";
+    const title = document.createElement("strong");
+    title.textContent = pack.title;
+    const detail = document.createElement("p");
+    detail.textContent = pack.description;
+    const status = document.createElement("span");
+    status.className = "citation-source";
+    status.textContent = `${pack.status.replaceAll("_", " ")} · ${pack.installed_module_count}/${pack.module_count} modules · ${pack.support_status} coverage`;
+    const coverage = document.createElement("p");
+    coverage.className = "meta-line";
+    coverage.textContent = pack.missing_modules.length
+      ? `Still missing: ${pack.missing_modules.join("; ")}.`
+      : `Topics: ${pack.supported_topics.join("; ")}.`;
+    const actions = document.createElement("div");
+    actions.className = "property-actions";
+    const install = resourceButton(
+      pack.installed_module_count ? "Update pack" : "Install pack",
+      () => startPackJob(pack.id, pack.installed_module_count ? "update" : "install"),
+    );
+    const check = resourceButton("Check for updates", () => startPackJob(pack.id, "check"));
+    actions.append(install, check);
+    if (pack.installed_module_count) {
+      actions.append(resourceButton("Remove pack", () => removePack(pack)));
+    }
+    if (pack.restorable_module_count) {
+      actions.append(resourceButton("Restore pack", () => startPackJob(pack.id, "restore")));
+    }
+    item.append(title, detail, status, coverage, actions);
+    list.append(item);
+  });
+}
+
+async function startPackJob(packId, operation, apply = false) {
+  const target = byId("source-pack-action-status");
+  target.textContent = `${operation.replaceAll("_", " ")} started…`;
+  try {
+    const job = await api(`/api/v1/source-packs/${encodeURIComponent(packId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({operation, ...(apply ? {apply: true} : {})}),
+    });
+    await loadJobs();
+    await pollCorpusJob(job.id, target);
+    target.textContent = `${operation.replaceAll("_", " ")} complete.`;
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+async function removePack(pack) {
+  const target = byId("source-pack-action-status");
+  try {
+    const preview = await api(`/api/v1/source-packs/${encodeURIComponent(pack.id)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({operation: "remove"}),
+    });
+    if (!window.confirm(
+      `Remove ${preview.installed_modules_to_remove.length} active module(s)? ${preview.saved_evidence_impact}`,
+    )) return;
+    await startPackJob(pack.id, "remove", true);
+  } catch (error) {
+    target.textContent = error.message;
+  }
 }
 
 function renderResources(resources, filter) {
@@ -791,6 +928,9 @@ function renderResources(resources, filter) {
       filter.append(option);
       actions.append(resourceButton("Replace file", () => replaceResource(resource)));
       actions.append(resourceButton("Edit details", () => editResource(resource)));
+      if (resource.media_type === "application/pdf") {
+        actions.append(resourceButton("Inspect text / OCR need", () => inspectResource(resource)));
+      }
       actions.append(resourceButton(
         resource.model_use_allowed ? "Disable provider use" : "Allow provider use",
         () => setResourceModelUse(resource, !resource.model_use_allowed),
@@ -841,6 +981,19 @@ async function setResourceModelUse(resource, allowed) {
   await mutateResource(resource.id, "model-use", {allowed});
 }
 
+async function inspectResource(resource) {
+  const target = byId("resource-action-status");
+  try {
+    const result = await api(`/api/v1/resources/${encodeURIComponent(resource.id)}/extraction-jobs`, {
+      method: "POST",
+      body: JSON.stringify({operation: "inspect"}),
+    });
+    target.textContent = `${result.report.embedded_text_pages}/${result.report.page_count} pages have useful embedded text; ${result.report.ocr_candidate_pages} page(s) are OCR candidates. ${result.report.ocr_runtime_reason}`;
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
 async function editResource(resource) {
   const title = window.prompt("Resource title", resource.name);
   if (title === null) return;
@@ -875,7 +1028,7 @@ async function editResource(resource) {
 function replaceResource(resource) {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".pdf,.md,.markdown,.txt,application/pdf,text/plain,text/markdown";
+  input.accept = ".pdf,.docx,.md,.markdown,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
   input.addEventListener("change", async () => {
     if (!input.files?.length) return;
     const form = new FormData();
@@ -968,6 +1121,9 @@ async function loadJobs() {
   const jobNames = {
     corpus_install: "Source installation",
     corpus_update: "Source update",
+    corpus_check: "Source update check",
+    corpus_remove: "Source-pack removal",
+    corpus_restore: "Source-pack restoration",
     corpus_verify: "Source check",
     corpus_rollback: "Source rollback",
     corpus_index: "Search quality update",
@@ -1118,8 +1274,7 @@ async function buildSemanticIndex() {
   }
 }
 
-async function pollCorpusJob(jobId) {
-  const target = byId("source-action-status");
+async function pollCorpusJob(jobId, target = byId("source-action-status")) {
   for (;;) {
     const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
     const progress = job.progress_total === null
@@ -1135,6 +1290,286 @@ async function pollCorpusJob(jobId) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }
+
+function renderHelpResources(body) {
+  const target = byId("help-resources");
+  target.replaceChildren();
+  if (body.message) {
+    const message = document.createElement("p");
+    message.className = "meta-line";
+    message.textContent = body.message;
+    target.append(message);
+  }
+  (body.cards || []).forEach((card) => {
+    const article = document.createElement("article");
+    article.className = "citation-item";
+    const title = document.createElement("h3");
+    title.textContent = card.title;
+    const text = document.createElement("p");
+    text.textContent = card.body;
+    const review = document.createElement("p");
+    review.className = "meta-line";
+    review.textContent = `NYC resource · catalog ${body.catalog_version} · ${body.editorial_status.replaceAll("_", " ")}`;
+    const actions = document.createElement("div");
+    actions.className = "property-actions";
+    card.actions.forEach((action) => {
+      const link = document.createElement("a");
+      link.textContent = action.label;
+      link.rel = "noopener noreferrer";
+      if (action.type === "telephone") {
+        link.href = `tel:${action.destination}`;
+      } else {
+        link.href = action.destination;
+        link.target = "_blank";
+      }
+      actions.append(link);
+    });
+    article.append(title, text, review, actions);
+    target.append(article);
+  });
+}
+
+byId("help-resources-open").addEventListener("click", async () => {
+  try {
+    renderHelpResources(await api(
+      `/api/v1/help-resources?language=${encodeURIComponent(currentLocale)}`,
+    ));
+  } catch (error) {
+    byId("help-resources").textContent = error.message;
+  }
+});
+
+async function loadMatters() {
+  const body = await api("/api/v1/matters?include_archived=false");
+  matterCache = body.matters;
+  const target = byId("matter-list");
+  target.replaceChildren();
+  if (!matterCache.length) {
+    const item = document.createElement("li");
+    item.textContent = "No saved matters yet.";
+    target.append(item);
+    return;
+  }
+  matterCache.forEach((matter) => {
+    const item = document.createElement("li");
+    item.className = "citation-item";
+    const title = document.createElement("strong");
+    title.textContent = matter.title;
+    const description = document.createElement("p");
+    description.textContent = matter.description || "No description.";
+    const meta = document.createElement("span");
+    meta.className = "citation-source";
+    meta.textContent = `${matter.item_count} saved item${matter.item_count === 1 ? "" : "s"} · revision ${matter.revision} · ${matter.tags.join(", ") || "no tags"}`;
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = "secondary-button";
+    exportButton.textContent = "Export matter";
+    exportButton.addEventListener("click", async () => {
+      try {
+        const result = await api(`/api/v1/matters/${encodeURIComponent(matter.id)}/export`, {
+          method: "POST",
+          body: "{}",
+        });
+        window.location.assign(result.download_url);
+      } catch (error) {
+        byId("matter-status").textContent = error.message;
+      }
+    });
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "secondary-button";
+    openButton.textContent = "Open matter";
+    openButton.addEventListener("click", () => {
+      openMatter(matter.id).catch((error) => {
+        byId("matter-status").textContent = error.message;
+      });
+    });
+    const archiveButton = document.createElement("button");
+    archiveButton.type = "button";
+    archiveButton.className = "secondary-button";
+    archiveButton.textContent = "Archive";
+    archiveButton.addEventListener("click", async () => {
+      try {
+        await api(`/api/v1/matters/${encodeURIComponent(matter.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({expected_revision: matter.revision, archived: true}),
+        });
+        byId("matter-detail").hidden = true;
+        await loadMatters();
+      } catch (error) {
+        byId("matter-status").textContent = error.message;
+      }
+    });
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "secondary-button";
+    deleteButton.textContent = "Delete matter";
+    deleteButton.addEventListener("click", async () => {
+      try {
+        const preview = await api(`/api/v1/matters/${encodeURIComponent(matter.id)}`, {
+          method: "DELETE",
+        });
+        if (!window.confirm(
+          `Delete this matter? ${preview.linked_item_count} saved item link(s) will be removed; shared saved payloads are retained.`,
+        )) return;
+        await api(`/api/v1/matters/${encodeURIComponent(matter.id)}?apply=true`, {
+          method: "DELETE",
+        });
+        byId("matter-detail").hidden = true;
+        await loadMatters();
+      } catch (error) {
+        byId("matter-status").textContent = error.message;
+      }
+    });
+    const actions = document.createElement("div");
+    actions.className = "property-actions";
+    actions.append(openButton, exportButton, archiveButton, deleteButton);
+    item.append(title, description, meta, actions);
+    target.append(item);
+  });
+}
+
+async function openMatter(matterId) {
+  const matter = await api(`/api/v1/matters/${encodeURIComponent(matterId)}`);
+  const target = byId("matter-detail");
+  target.replaceChildren();
+  target.hidden = false;
+
+  const heading = document.createElement("div");
+  heading.className = "panel-heading";
+  const headingCopy = document.createElement("div");
+  const title = document.createElement("h2");
+  title.textContent = matter.title;
+  const description = document.createElement("p");
+  description.textContent = matter.description || "No description.";
+  headingCopy.append(title, description);
+  heading.append(headingCopy);
+  target.append(heading);
+
+  const itemHeading = document.createElement("h3");
+  itemHeading.textContent = "Saved items";
+  const items = document.createElement("ul");
+  items.className = "citation-list";
+  if (!matter.items.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "No results have been saved to this matter.";
+    items.append(empty);
+  }
+  matter.items.forEach((savedItem) => {
+    const row = document.createElement("li");
+    row.className = "citation-item";
+    const label = document.createElement("strong");
+    label.textContent = savedItem.kind.replaceAll("_", " ");
+    const meta = document.createElement("span");
+    meta.className = "citation-source";
+    meta.textContent = `Saved ${formatDate(savedItem.created_at)} · SHA-256 ${savedItem.payload_hash}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary-button";
+    remove.textContent = "Remove from matter";
+    remove.addEventListener("click", async () => {
+      try {
+        const base = `/api/v1/saved-items/${encodeURIComponent(savedItem.id)}?matter_id=${encodeURIComponent(matter.id)}`;
+        const preview = await api(base, {method: "DELETE"});
+        const consequence = preview.saved_item_will_be_deleted
+          ? "This is its final matter link, so the saved payload will also be deleted."
+          : "The immutable payload remains linked to another matter.";
+        if (!window.confirm(`Remove this item? ${consequence}`)) return;
+        await api(`${base}&apply=true`, {method: "DELETE"});
+        await Promise.all([openMatter(matter.id), loadMatters()]);
+      } catch (error) {
+        byId("matter-status").textContent = error.message;
+      }
+    });
+    row.append(label, meta, remove);
+    items.append(row);
+  });
+  target.append(itemHeading, items);
+
+  const noteHeading = document.createElement("h3");
+  noteHeading.textContent = "Notes";
+  const notes = document.createElement("div");
+  notes.className = "settings-stack";
+  matter.notes.forEach((note) => {
+    const form = document.createElement("form");
+    form.className = "query-form";
+    const label = document.createElement("label");
+    label.textContent = `Note · revision ${note.revision}`;
+    const input = document.createElement("textarea");
+    input.value = note.body;
+    input.maxLength = 50000;
+    label.append(input);
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.textContent = "Save note";
+    form.append(label, save);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await api(`/api/v1/notes/${encodeURIComponent(note.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            body: input.value,
+            expected_revision: note.revision,
+            matter_id: matter.id,
+          }),
+        });
+        await openMatter(matter.id);
+      } catch (error) {
+        byId("matter-status").textContent = error.message;
+      }
+    });
+    notes.append(form);
+  });
+  const newNote = document.createElement("form");
+  newNote.className = "query-form";
+  const newNoteLabel = document.createElement("label");
+  newNoteLabel.textContent = "New note";
+  const newNoteBody = document.createElement("textarea");
+  newNoteBody.maxLength = 50000;
+  newNoteLabel.append(newNoteBody);
+  const addNote = document.createElement("button");
+  addNote.type = "submit";
+  addNote.textContent = "Add note";
+  newNote.append(newNoteLabel, addNote);
+  newNote.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/api/v1/matters/${encodeURIComponent(matter.id)}/notes`, {
+        method: "POST",
+        body: JSON.stringify({body: newNoteBody.value}),
+      });
+      await openMatter(matter.id);
+    } catch (error) {
+      byId("matter-status").textContent = error.message;
+    }
+  });
+  notes.append(newNote);
+  target.append(noteHeading, notes);
+}
+
+byId("matter-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/v1/matters", {
+      method: "POST",
+      body: JSON.stringify({
+        title: byId("matter-title").value,
+        description: byId("matter-description").value,
+        tags: byId("matter-tags").value.split(",").map((item) => item.trim()).filter(Boolean),
+      }),
+    });
+    event.target.reset();
+    byId("matter-status").textContent = "Matter created.";
+    await loadMatters();
+  } catch (error) {
+    byId("matter-status").textContent = error.message;
+  }
+});
+
+byId("matters-refresh").addEventListener("click", () => {
+  loadMatters().catch((error) => { byId("matter-status").textContent = error.message; });
+});
 
 byId("source-install").addEventListener("click", () => startCorpusJob("install"));
 byId("source-update").addEventListener("click", () => startCorpusJob("update"));
@@ -1174,6 +1609,11 @@ async function loadSettings() {
   byId("operational-retention").value = settings.operational_retention_days;
   byId("usage-retention").value = settings.usage_retention_months;
   byId("offline-mode").checked = settings.offline;
+  byId("default-answer-language").value = settings.answer_language;
+  byId("default-reading-style").value = settings.reading_style;
+  byId("answer-language").value = settings.answer_language;
+  byId("reading-style").value = settings.reading_style;
+  if (settings.ui_locale !== currentLocale) await applyLocale(settings.ui_locale);
   const selectedProfiles = [
     profiles.profiles.find((item) => item.id === settings.answer_profile),
     profiles.profiles.find((item) => item.id === settings.embedding_profile),
@@ -1233,12 +1673,28 @@ byId("settings-form").addEventListener("submit", async (event) => {
         operational_retention_days: Number.parseInt(byId("operational-retention").value, 10),
         usage_retention_months: Number.parseInt(byId("usage-retention").value, 10),
         offline: byId("offline-mode").checked,
+        answer_language: byId("default-answer-language").value,
+        reading_style: byId("default-reading-style").value,
       }),
     });
     byId("settings-status").textContent = "Changes saved. Restart before starting new provider-backed work.";
     await loadUsage();
   } catch (error) {
     byId("settings-status").textContent = error.message;
+  }
+});
+
+byId("offline-readiness-check").addEventListener("click", async () => {
+  const target = byId("offline-readiness-result");
+  target.textContent = "Checking installed local capabilities…";
+  try {
+    const result = await api("/api/v1/offline/readiness");
+    const summary = Object.entries(result.capabilities).map(([name, value]) => (
+      `${name.replaceAll("_", " ")}: ${value.state}${value.reason_code ? ` (${value.reason_code})` : ""}`
+    ));
+    target.textContent = summary.join(" · ");
+  } catch (error) {
+    target.textContent = error.message;
   }
 });
 
@@ -1358,6 +1814,7 @@ async function runPropertySearch(query) {
   byId("property-next").hidden = true;
   byId("property-refresh").hidden = true;
   byId("property-summary").hidden = true;
+  byId("property-dossier").hidden = true;
   byId("property-export").hidden = true;
   byId("property-export-complete").hidden = true;
   byId("property-export-cancel").hidden = true;
@@ -1379,6 +1836,7 @@ async function runPropertySearch(query) {
 function renderProperty(target, body) {
   target.className = "hpd-table-wrap";
   target.replaceChildren();
+  byId("property-dossier").hidden = body.requires_selection || !body.records.length;
   const status = document.createElement("p");
   status.className = "meta-line";
   const total = body.total_count === null ? "total not requested" : `${body.total_count} total`;
@@ -1539,6 +1997,31 @@ byId("property-export-complete").addEventListener("click", async () => {
   }
 });
 
+byId("property-dossier").addEventListener("click", async () => {
+  if (!lastPropertyQuery) return;
+  const target = byId("property-result");
+  try {
+    const identity = await api("/api/v1/properties/resolve", {
+      method: "POST",
+      body: JSON.stringify(lastPropertyQuery),
+    });
+    if (identity.requires_selection) {
+      target.textContent = "Confirm one of the returned buildings before creating a dossier.";
+      return;
+    }
+    const dossier = await api(`/api/v1/properties/${encodeURIComponent(identity.id)}/dossiers`, {
+      method: "POST",
+      body: JSON.stringify({query: lastPropertyQuery, panels: ["hpd_violations"]}),
+    });
+    const notice = document.createElement("p");
+    notice.className = "meta-line";
+    notice.textContent = `Dossier ${dossier.id} saved locally with payload hash ${dossier.payload_hash}.`;
+    target.prepend(notice);
+  } catch (error) {
+    target.textContent = error.message;
+  }
+});
+
 async function pollPropertyExportJob(jobId, target) {
   for (;;) {
     const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
@@ -1619,6 +2102,7 @@ byId("demo-search").addEventListener("click", async () => {
 
 const fragment = new URLSearchParams(window.location.hash.slice(1));
 const fragmentToken = fragment.get("launch");
+applyLocale(currentLocale).catch(() => false);
 if (fragmentToken) {
   history.replaceState(null, "", window.location.pathname + window.location.search);
   connect(fragmentToken).catch((error) => {

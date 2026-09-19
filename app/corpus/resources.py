@@ -323,6 +323,7 @@ class ResourceService:
                             else 0
                         ),
                         "warnings": provenance.get("warnings", []),
+                        "media_type": provenance.get("media_type"),
                     }
                 )
             return result
@@ -346,9 +347,7 @@ class ResourceService:
             latest = self._latest_version(connection, resource_id)
             selected_id = active_version or (latest["id"] if latest else None)
             selected = self._version(connection, selected_id) if selected_id else None
-            provenance = (
-                _json_object(selected["provenance_json"]) if selected else {}
-            )
+            provenance = _json_object(selected["provenance_json"]) if selected else {}
             versions = list(
                 connection.execute(
                     select(source_versions)
@@ -381,9 +380,7 @@ class ResourceService:
                         "retrieved_at": _iso(row["retrieved_at"]),
                         "active": row["id"] == active_version,
                         "provenance": _json_object(row["provenance_json"]),
-                        "chunk_count": self._version_chunk_count(
-                            connection, row["id"]
-                        ),
+                        "chunk_count": self._version_chunk_count(connection, row["id"]),
                     }
                     for row in versions
                 ],

@@ -12,22 +12,34 @@ current law before relying on a result.
 ## What works
 
 - Downloads and locally indexes five official legal/guidance modules.
-- Imports user-provided PDF, Markdown, and UTF-8 text resources for private local
-  search, with explicit per-resource consent before provider-backed use.
+- Offers an optional, explicitly partial rent-regulation source pack with the NYC
+  Rent Stabilization Law and curated DHCR guidance; unresolved RSC, ETPA, fact-sheet,
+  and bulletin coverage is shown rather than implied.
+- Imports user-provided PDF, DOCX, Markdown, and UTF-8 text resources for private
+  local search, with structural DOCX locators, PDF text/OCR-readiness inspection,
+  and explicit per-resource consent before provider-backed use.
 - Searches citations and full text without an API key.
 - Optionally builds a local semantic index and generates evidence-cited answers
-  with a user-supplied OpenAI key.
+  with a user-supplied OpenAI key, including Spanish-output and plain-language
+  controls that preserve the cited source evidence.
 - Looks up filtered property violations from the official NYC Open Data HPD
   dataset without downloading its roughly 11-million-row table.
+- Organizes explicitly saved results into local research matters, compares retained
+  official-source versions, and builds confirmed-identity property dossiers whose
+  dataset panels remain separate and provenance-labeled.
+- Provides deterministic, model-independent urgent-housing resource routing and
+  English/Spanish interface catalogs; both are review-status labeled.
 - Caches property pages for offline reuse, creates scoped exports, and supports
   secret-free workspace backup/restore.
 - Enforces loopback-only access, one-use launch credentials, session/CSRF checks,
   exact local spend reservations, a user-lowerable one-or-two-call concurrency
   limit, and an offline egress policy.
 
-Citywide HPD analytics, a complete offline HPD snapshot, fully local models,
-saved research history, and Docker are independent optional extensions—not L1
-requirements.
+Citywide HPD analytics, a complete offline HPD snapshot, a reviewed local-model
+runtime, production OCR, and Docker remain independent optional extensions—not
+L1 requirements. The interface reports those capabilities as blocked until a
+reviewed artifact and evaluation are installed; cached property pages are never
+presented as a complete snapshot.
 
 ## Standalone macOS application
 
@@ -105,6 +117,38 @@ that resource to be eligible for semantic indexing and cited model answers.
 Workspace backups include personal resources; portable corpus bundles exclude
 them.
 
+Research matters keep an immutable copy of each explicitly saved result and its
+evidence while allowing editable notes. They can be searched and exported as a
+checksummed ZIP:
+
+```bash
+uv run nyc-housing matters create "Heat complaint" --tag heat
+uv run nyc-housing matters list --json
+uv run nyc-housing matters show MATTER_ID --json
+uv run nyc-housing matters export MATTER_ID
+```
+
+Retained versions of the same official module can be compared without a model.
+The comparison aligns stable citations where possible and reports saved items
+whose cited chunks changed:
+
+```bash
+uv run nyc-housing corpus diff MODULE_SLUG BASE_VERSION_ID TARGET_VERSION_ID --json
+```
+
+Optional source packs can be managed in **Sources → Available source packs** or
+from the CLI. Pack installation does not change the five-module core-readiness
+contract, and removal is preview-only unless `--apply` is supplied:
+
+```bash
+uv run nyc-housing packs list --json
+uv run nyc-housing packs install rent-regulation
+uv run nyc-housing packs check rent-regulation
+uv run nyc-housing packs remove rent-regulation
+uv run nyc-housing packs remove rent-regulation --apply
+uv run nyc-housing packs restore rent-regulation
+```
+
 For advanced CLI users, the separate model configuration commands are:
 
 ```bash
@@ -144,6 +188,7 @@ uv run nyc-housing usage --json
 uv run nyc-housing evaluate --answers --estimate-only --json
 uv run nyc-housing debug answer --question "What does RPAPL 711 cover?" --json
 uv run nyc-housing maintenance prune --json
+uv run nyc-housing offline status --json
 uv run nyc-housing backup ./workspace-backup.zip
 uv run nyc-housing restore ./workspace-backup.zip --destination ./restored-workspace
 ```

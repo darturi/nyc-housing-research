@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
@@ -16,6 +17,8 @@ from sqlalchemy import select
 from starlette.datastructures import FormData, UploadFile
 
 from app import __version__
+from app.corpus.extractions import ExtractionService
+from app.corpus.packs import SourcePackService
 from app.corpus.resource_parsers import MAX_RESOURCE_BYTES
 from app.corpus.resources import ResourceMetadata, ResourceService
 from app.corpus.service import CorpusService, CorpusValidationError
@@ -26,6 +29,7 @@ from app.credentials.store import (
     validate_credential,
 )
 from app.exporting.service import ExportError, ResearchExporter, safe_export_path
+from app.help.routing import HelpCatalogError, HelpResourceService
 from app.hpd.cache import CachedPropertyRepository, PropertyCacheError
 from app.hpd.connector import (
     HpdSocrataConnector,
@@ -46,9 +50,11 @@ from app.jobs.service import (
     JobConflict,
     JobNotFound,
 )
+from app.localization.catalog import LocaleCatalogError, load_locale_catalog
 from app.maintenance.diagnostics import workspace_status
 from app.maintenance.logging import LocalDiagnosticLog
 from app.maintenance.retention import RetentionError, WorkspaceRetentionService
+from app.offline.service import OfflineExtensionError, OfflineExtensionService
 from app.providers.gateway import ProviderExecutionError, ProviderGateway
 from app.providers.profiles import (
     ProfileKind,
@@ -61,6 +67,9 @@ from app.providers.validation import (
     run_credential_validation,
 )
 from app.query_routing.router import classify_query, hpd_request_from_question
+from app.research.comparisons import ComparisonError, SourceComparisonService
+from app.research.dossiers import DossierError, PropertyDossierService
+from app.research.matters import MatterConflict, MatterError, MatterService
 from app.retrieval.local import LocalSearch, LocalSearchFilters
 from app.security.local_session import (
     SESSION_COOKIE,
@@ -70,7 +79,7 @@ from app.security.local_session import (
 from app.storage.database import LocalStorage
 from app.storage.schema import maintenance_state
 from app.usage.ledger import PaidCapacityUnavailable, SpendDenied, UsageLedger
-from app.workspace.context import WorkspaceContext
+from app.workspace.context import WorkspaceContext, network_policy_for_settings
 from app.workspace.network import NetworkAccessDenied
 from app.workspace.settings import LocalSettingsError, save_local_settings
 
@@ -152,7 +161,7 @@ def create_local_app(
             "/api/v1/local-session",
             "/api/v1/session/exchange",
             "/api/v1/demo/search",
-        } or request.url.path.startswith("/static/")
+        } or request.url.path.startswith(("/static/", "/api/v1/locales/"))
         changing = request.method not in {"GET", "HEAD", "OPTIONS"}
         if changing and not _same_origin(request):
             diagnostic_log.record(
@@ -183,9 +192,7 @@ def create_local_app(
                 "multipart/form-data"
             )
         ):
-            too_large = await _read_bounded_body(
-                request, MAX_RESOURCE_REQUEST_BYTES
-            )
+            too_large = await _read_bounded_body(request, MAX_RESOURCE_REQUEST_BYTES)
             if too_large:
                 return JSONResponse(
                     {"error": "Resource upload exceeds the 25 MiB limit."},
@@ -228,8 +235,16 @@ def create_local_app(
                 "app_name": context.settings.app_name,
                 "initialized": context.initialized,
                 "offline": context.settings.offline,
+                "ui_locale": context.settings.ui_locale,
             },
         )
+
+    @app.get("/api/v1/locales/{locale}")
+    def locale_catalog(locale: str) -> JSONResponse:
+        try:
+            return JSONResponse(load_locale_catalog(locale))
+        except LocaleCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     @app.post("/api/v1/local-session")
     @app.post("/api/v1/session/exchange")
@@ -284,6 +299,7 @@ def create_local_app(
         service = CorpusService(storage)
         status = service.status()
         resources = ResourceService(storage).list()
+        packs = SourcePackService(service).list()
         return JSONResponse(
             {
                 "active_generation_id": status.active_generation_id,
@@ -292,6 +308,7 @@ def create_local_app(
                 "chunk_count": status.chunk_count,
                 "embedding_ready_count": status.embedding_ready_count,
                 "sources": service.source_statuses(),
+                "source_packs": packs,
                 "resources": resources,
                 "resource_count": len(resources),
                 "active_resource_count": sum(
@@ -299,6 +316,52 @@ def create_local_app(
                 ),
             }
         )
+
+    @app.get("/api/v1/source-packs")
+    def list_source_packs() -> JSONResponse:
+        packs = SourcePackService(CorpusService(storage)).list()
+        return JSONResponse({"source_packs": packs})
+
+    @app.get("/api/v1/source-packs/{pack_id}")
+    def get_source_pack(pack_id: str) -> JSONResponse:
+        try:
+            pack = SourcePackService(CorpusService(storage)).get(pack_id)
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse(pack)
+
+    @app.post("/api/v1/source-packs/{pack_id}/jobs")
+    async def start_source_pack_job(pack_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "operation",
+                "modules",
+                "apply",
+            }:
+                raise ValueError("Source-pack job request contains unsupported fields.")
+            operation = str(payload.get("operation", ""))
+            if operation not in {"install", "update", "check", "remove", "restore"}:
+                raise ValueError("Unsupported source-pack operation.")
+            raw_modules = payload.get("modules")
+            if raw_modules is not None and (
+                not isinstance(raw_modules, list)
+                or not all(isinstance(item, str) for item in raw_modules)
+            ):
+                raise ValueError("modules must be a list of source IDs.")
+            packs = SourcePackService(CorpusService(storage))
+            modules = packs.module_slugs(pack_id, raw_modules)
+            if operation == "remove" and payload.get("apply") is not True:
+                return JSONResponse(packs.removal_preview(pack_id, modules))
+            job = maintenance_jobs.submit(
+                operation,
+                sources=modules,
+                pack_id=pack_id,
+                allow_partial=True,
+            )
+        except (CorpusValidationError, JobConflict, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse(job_payload(job), status_code=202)
 
     @app.get("/api/v1/resources")
     def list_resources(include_removed: bool = True) -> JSONResponse:
@@ -417,9 +480,7 @@ def create_local_app(
                     operation_id=operation_id,
                 ),
             )
-            return JSONResponse(
-                {"job": job_payload(job), "result": result.as_dict()}
-            )
+            return JSONResponse({"job": job_payload(job), "result": result.as_dict()})
         except JobConflict as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         except CorpusValidationError as exc:
@@ -478,9 +539,7 @@ def create_local_app(
             ),
         )
 
-    @app.get(
-        "/api/v1/resources/{resource_id}/versions/{version_id}/chunks/{chunk_id}"
-    )
+    @app.get("/api/v1/resources/{resource_id}/versions/{version_id}/chunks/{chunk_id}")
     def resource_excerpt(
         resource_id: str, version_id: str, chunk_id: str
     ) -> JSONResponse:
@@ -498,9 +557,7 @@ def create_local_app(
             path = service.original_path(resource_id, version_id)
             provenance = service.version(resource_id, version_id)["provenance"]
             filename = str(provenance.get("original_basename") or "resource")
-            media_type = str(
-                provenance.get("media_type") or "application/octet-stream"
-            )
+            media_type = str(provenance.get("media_type") or "application/octet-stream")
             return FileResponse(path, filename=filename, media_type=media_type)
         except CorpusValidationError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
@@ -535,12 +592,21 @@ def create_local_app(
                 "property_cache_retention_days",
                 "operational_retention_days",
                 "usage_retention_months",
+                "ui_locale",
+                "answer_language",
+                "reading_style",
+                "local_runtime_enabled",
+                "local_runtime_endpoint",
             }
             if not isinstance(payload, dict) or not set(payload) <= allowed:
                 raise LocalSettingsError("Unsupported or invalid settings field.")
             candidate = replace(context.settings, **payload).validate()
             save_local_settings(context.paths, candidate)
-            context = replace(context, settings=candidate)
+            context = replace(
+                context,
+                settings=candidate,
+                network=network_policy_for_settings(candidate),
+            )
             app.state.workspace = context
         except (TypeError, LocalSettingsError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -591,9 +657,7 @@ def create_local_app(
             )
         try:
             result = _store_credential(context, provider, payload)
-            context, activated = _activate_packaged_openai_profiles(
-                context, provider
-            )
+            context, activated = _activate_packaged_openai_profiles(context, provider)
             app.state.workspace = context
         except (AttributeError, CredentialStoreError, LocalSettingsError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -611,9 +675,7 @@ def create_local_app(
             )
         try:
             result = _store_credential(context, provider, payload)
-            context, activated = _activate_packaged_openai_profiles(
-                context, provider
-            )
+            context, activated = _activate_packaged_openai_profiles(context, provider)
             app.state.workspace = context
         except (AttributeError, CredentialStoreError, LocalSettingsError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -724,8 +786,17 @@ def create_local_app(
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         warnings = []
+        pack_coverage = SourcePackService(CorpusService(storage)).coverage_for_query(q)
         if corpus.is_partial:
             warnings.append("The active legal corpus is partial.")
+        if any(
+            item["coverage_status"] == "partial_topic_coverage"
+            for item in pack_coverage
+        ):
+            warnings.append(
+                "Relevant optional source-pack coverage is incomplete; review "
+                "the reported missing modules and limitations."
+            )
         if result.semantic_status != "ready":
             warnings.append(
                 "Semantic retrieval is unavailable; results use exact/keyword search."
@@ -742,6 +813,7 @@ def create_local_app(
                     "source_count": corpus.source_count,
                     "source_filter": source,
                     "scope": scope,
+                    "source_pack_notices": pack_coverage,
                 },
                 "warnings": warnings,
                 "provenance": {
@@ -790,6 +862,7 @@ def create_local_app(
                 "jurisdiction",
                 "scope",
                 "limit",
+                "query_language",
             }:
                 raise ValueError("Search request contains unsupported fields.")
             query = str(payload.get("q") or payload.get("query") or "")
@@ -815,6 +888,8 @@ def create_local_app(
                 "scope",
                 "limit",
                 "allow_unknown_cost",
+                "answer_language",
+                "reading_style",
             }:
                 raise ValueError("Answer request contains unsupported fields.")
             if "allow_unknown_cost" in payload and not isinstance(
@@ -834,13 +909,21 @@ def create_local_app(
                 ),
                 limit=limit,
                 allow_unknown_cost=payload.get("allow_unknown_cost") is True,
+                answer_language=(
+                    str(payload["answer_language"])
+                    if payload.get("answer_language")
+                    else context.settings.answer_language
+                ),
+                reading_style=(
+                    str(payload["reading_style"])
+                    if payload.get("reading_style")
+                    else context.settings.reading_style
+                ),
             )
         except (AttributeError, TypeError, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         corpus = CorpusService(storage).status()
-        answer_profile = get_configured_profile(
-            context.settings, ProfileKind.ANSWER
-        )
+        answer_profile = get_configured_profile(context.settings, ProfileKind.ANSWER)
         warnings = ["The active legal corpus is partial."] if corpus.is_partial else []
         if payload.get("allow_unknown_cost") is True:
             warnings.append(
@@ -865,6 +948,14 @@ def create_local_app(
                     "answer_profile_id": answer_profile.id,
                     "cost_known": answer_profile.pricing_verified,
                 },
+                "output_preferences": {
+                    "answer_language": payload.get(
+                        "answer_language", context.settings.answer_language
+                    ),
+                    "reading_style": payload.get(
+                        "reading_style", context.settings.reading_style
+                    ),
+                },
             },
             status_code=202,
         )
@@ -878,6 +969,8 @@ def create_local_app(
                 "question",
                 "mode",
                 "limit",
+                "language",
+                "housing_context",
             }:
                 raise ValueError("Route request contains unsupported fields.")
             question = str(payload.get("question", "")).strip()
@@ -888,6 +981,11 @@ def create_local_app(
             if mode not in {"auto", "property"}:
                 raise ValueError("Route mode must be auto or property.")
             route = classify_query(question)
+            suggestions = HelpResourceService(storage).match(
+                question,
+                language=str(payload.get("language", context.settings.ui_locale)),
+                housing_context=payload.get("housing_context"),
+            )
             if mode == "property" or route.kind == "property":
                 try:
                     legacy_request = hpd_request_from_question(question, limit)
@@ -898,6 +996,7 @@ def create_local_app(
                             "route_reason": route.reason,
                             "query": None,
                             "message": str(exc),
+                            "resource_suggestions": suggestions,
                         }
                     )
                 values = legacy_request.model_dump(exclude_none=True)
@@ -922,6 +1021,7 @@ def create_local_app(
                         "message": (
                             "Confirm the resolved property before relying on records."
                         ),
+                        "resource_suggestions": suggestions,
                     }
                 )
             return JSONResponse(
@@ -930,6 +1030,7 @@ def create_local_app(
                     "route_reason": route.reason,
                     "query": None,
                     "message": "Searching installed legal sources locally.",
+                    "resource_suggestions": suggestions,
                 }
             )
         except (AttributeError, TypeError, ValueError) as exc:
@@ -1259,9 +1360,11 @@ def create_local_app(
                 "omitted_property_rows": result.omitted_property_rows,
             },
             "warnings": (
-                ([] if result.property_is_complete else [
-                    "The summarized property page is not a complete history."
-                ])
+                (
+                    []
+                    if result.property_is_complete
+                    else ["The summarized property page is not a complete history."]
+                )
                 + (
                     []
                     if result.cost_known
@@ -1501,6 +1604,578 @@ def create_local_app(
             return JSONResponse({"error": str(exc)}, status_code=404)
         return FileResponse(path, filename=path.name)
 
+    # Durable research matters -------------------------------------------------
+    @app.get("/api/v1/matters")
+    def list_matters(
+        q: str | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> JSONResponse:
+        try:
+            items = MatterService(storage).list(
+                query=q, include_archived=include_archived, limit=limit
+            )
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"matters": items})
+
+    @app.post("/api/v1/matters")
+    async def create_matter(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "title",
+                "description",
+                "tags",
+            }:
+                raise MatterError("Matter request contains unsupported fields.")
+            matter = MatterService(storage).create(
+                payload.get("title", ""),
+                description=payload.get("description", ""),
+                tags=payload.get("tags", []),
+            )
+        except (MatterError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(matter, status_code=201)
+
+    @app.get("/api/v1/matters/{matter_id}")
+    def get_matter(matter_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(MatterService(storage).get(matter_id))
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.patch("/api/v1/matters/{matter_id}")
+    async def update_matter(matter_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or "expected_revision" not in payload:
+                raise MatterError("expected_revision is required.")
+            revision = int(payload.pop("expected_revision"))
+            result = MatterService(storage).update(
+                matter_id, payload, expected_revision=revision
+            )
+        except MatterConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except (MatterError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(result)
+
+    @app.delete("/api/v1/matters/{matter_id}")
+    def delete_matter(matter_id: str, apply: bool = False) -> JSONResponse:
+        try:
+            return JSONResponse(MatterService(storage).delete(matter_id, apply=apply))
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.post("/api/v1/matters/{matter_id}/items")
+    async def save_matter_item(matter_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise MatterError("Saved-item request must be a JSON object.")
+            allowed = {
+                "job_id",
+                "saved_item_id",
+                "search",
+                "dossier_id",
+                "comparison_id",
+                "idempotency_key",
+            }
+            if not set(payload) <= allowed:
+                raise MatterError("Saved-item request contains unsupported fields.")
+            service = MatterService(storage)
+            if payload.get("saved_item_id"):
+                return JSONResponse(
+                    service.link(matter_id, str(payload["saved_item_id"]))
+                )
+            idempotency_key = str(payload.get("idempotency_key", ""))
+            if payload.get("job_id"):
+                job_id = str(payload["job_id"])
+                job = interactive_jobs.get(job_id)
+                if not job.get("result"):
+                    raise MatterConflict("A completed server-held answer is required.")
+                result = service.save_payload(
+                    matter_id,
+                    kind="answer",
+                    payload=job["result"],
+                    source_identity=f"answer-job:{job_id}",
+                    idempotency_key=idempotency_key,
+                    original_operation_id=job_id,
+                )
+            elif payload.get("search"):
+                raw = payload["search"]
+                if not isinstance(raw, dict) or not set(raw) <= {
+                    "query",
+                    "source",
+                    "scope",
+                    "limit",
+                }:
+                    raise MatterError("Saved search request is invalid.")
+                query_text = str(raw.get("query", ""))
+                scope = str(raw.get("scope", "core"))
+                searched = LocalSearch(storage).search(
+                    query_text,
+                    filters=LocalSearchFilters(
+                        source_slug=raw.get("source"), origin=_scope_origin(scope)
+                    ),
+                    limit=int(raw.get("limit", 10)),
+                )
+                saved_payload = {
+                    "query": query_text,
+                    "scope": scope,
+                    "generation_id": searched.generation_id,
+                    "method": searched.method,
+                    "semantic_status": searched.semantic_status,
+                    "results": [asdict(item) for item in searched.results],
+                }
+                identity = (
+                    "search:"
+                    + hashlib.sha256(
+                        json.dumps(saved_payload, sort_keys=True).encode()
+                    ).hexdigest()
+                )
+                result = service.save_payload(
+                    matter_id,
+                    kind="search",
+                    payload=saved_payload,
+                    source_identity=identity,
+                    idempotency_key=idempotency_key,
+                )
+            elif payload.get("dossier_id"):
+                dossier_id = str(payload["dossier_id"])
+                dossier = PropertyDossierService(storage).get_observation(dossier_id)
+                result = service.save_payload(
+                    matter_id,
+                    kind="property_dossier",
+                    payload=dossier,
+                    source_identity=f"dossier:{dossier_id}:{dossier['payload_hash']}",
+                    idempotency_key=idempotency_key,
+                )
+            elif payload.get("comparison_id"):
+                comparison_id = str(payload["comparison_id"])
+                comparison = SourceComparisonService(storage).get(comparison_id)
+                result = service.save_payload(
+                    matter_id,
+                    kind="comparison",
+                    payload=comparison,
+                    source_identity=f"comparison:{comparison_id}",
+                    idempotency_key=idempotency_key,
+                )
+            else:
+                raise MatterError("Choose a server-held result to save.")
+        except JobNotFound:
+            return JSONResponse({"error": "Answer job not found."}, status_code=404)
+        except (MatterConflict, ComparisonError, DossierError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except (MatterError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(result, status_code=201)
+
+    @app.get("/api/v1/saved-items/{item_id}")
+    def get_saved_item(item_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(MatterService(storage).get_item(item_id))
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.delete("/api/v1/saved-items/{item_id}")
+    def delete_saved_item(
+        item_id: str,
+        matter_id: str | None = None,
+        apply: bool = False,
+    ) -> JSONResponse:
+        try:
+            return JSONResponse(
+                MatterService(storage).delete_item(
+                    item_id, matter_id=matter_id, apply=apply
+                )
+            )
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.post("/api/v1/matters/{matter_id}/notes")
+    async def create_matter_note(matter_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or set(payload) != {"body"}:
+                raise MatterError("Note request requires only body.")
+            note = MatterService(storage).put_note(
+                matter_id=matter_id, body=payload["body"]
+            )
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(note, status_code=201)
+
+    @app.patch("/api/v1/notes/{note_id}")
+    async def update_note(note_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or set(payload) != {
+                "body",
+                "expected_revision",
+                "matter_id",
+            }:
+                raise MatterError(
+                    "Note update requires body, expected_revision, and matter_id."
+                )
+            note = MatterService(storage).put_note(
+                note_id=note_id,
+                matter_id=str(payload["matter_id"]),
+                body=payload["body"],
+                expected_revision=int(payload["expected_revision"]),
+            )
+        except MatterConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except (MatterError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(note)
+
+    @app.post("/api/v1/matters/{matter_id}/export")
+    def export_matter(matter_id: str) -> JSONResponse:
+        try:
+            path = MatterService(storage).export(matter_id, context.paths.exports)
+        except MatterError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse(
+            {"filename": path.name, "download_url": f"/api/v1/exports/{path.name}"}
+        )
+
+    # Retained source comparison ----------------------------------------------
+    @app.post("/api/v1/comparisons")
+    async def create_comparison(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or set(payload) != {
+                "module_slug",
+                "baseline_version_id",
+                "target_version_id",
+            }:
+                raise ComparisonError("Comparison request fields are invalid.")
+            result = SourceComparisonService(storage).create(
+                str(payload["module_slug"]),
+                str(payload["baseline_version_id"]),
+                str(payload["target_version_id"]),
+            )
+        except ComparisonError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(result, status_code=201)
+
+    @app.get("/api/v1/comparisons/{comparison_id}")
+    def get_comparison(
+        comparison_id: str,
+        classification: str | None = None,
+        include_unchanged: bool = False,
+    ) -> JSONResponse:
+        try:
+            result = SourceComparisonService(storage).get(
+                comparison_id,
+                classification=classification,
+                include_unchanged=include_unchanged,
+            )
+        except ComparisonError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse(result)
+
+    @app.post("/api/v1/comparisons/{comparison_id}/reviews")
+    async def review_comparison(comparison_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {"item_id", "note"}:
+                raise ComparisonError("Comparison review request is invalid.")
+            result = SourceComparisonService(storage).record_review(
+                comparison_id,
+                str(payload.get("item_id", "")),
+                note=str(payload.get("note", "")),
+            )
+        except ComparisonError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(result, status_code=201)
+
+    @app.post("/api/v1/comparisons/{comparison_id}/export")
+    async def export_comparison(comparison_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            format = str(payload.get("format", "markdown"))
+            path = SourceComparisonService(storage).export(
+                comparison_id, context.paths.exports, format=format
+            )
+        except (AttributeError, ComparisonError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(
+            {"filename": path.name, "download_url": f"/api/v1/exports/{path.name}"}
+        )
+
+    # Confirmed property dossiers ---------------------------------------------
+    @app.post("/api/v1/properties/resolve")
+    async def resolve_property(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Property resolution request must be JSON.")
+            confirmed = payload.pop("confirmed_building_id", None)
+            refresh = bool(payload.pop("refresh", False))
+            query = _property_query(payload)
+            connector, repository = _property_repository(
+                context, storage, property_connector_factory
+            )
+            try:
+                result = repository.search(
+                    query, refresh=refresh, deadline=Deadline.after(15)
+                )
+            finally:
+                connector.close()
+            resolved = PropertyDossierService(storage).resolve(
+                result,
+                confirmed_building_id=str(confirmed) if confirmed else None,
+            )
+        except (AttributeError, DossierError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except (
+            CredentialStoreError,
+            NetworkAccessDenied,
+            OperationDeadlineExceeded,
+            PropertyCacheError,
+            PropertyConnectorError,
+        ) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        return JSONResponse(resolved)
+
+    @app.post("/api/v1/properties/{identity_id}/dossiers")
+    async def create_dossier(identity_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "query",
+                "panels",
+                "refresh",
+            }:
+                raise DossierError("Dossier request contains unsupported fields.")
+            query = _property_query(payload.get("query"))
+            panels = payload.get("panels")
+            if panels is not None and (
+                not isinstance(panels, list)
+                or not all(isinstance(item, str) for item in panels)
+            ):
+                raise DossierError("panels must be a list of names.")
+            connector, repository = _property_repository(
+                context, storage, property_connector_factory
+            )
+            try:
+                result = repository.search(
+                    query,
+                    refresh=payload.get("refresh") is True,
+                    deadline=Deadline.after(15),
+                )
+            finally:
+                connector.close()
+            dossier = PropertyDossierService(storage).create_observation(
+                identity_id, result, panels=panels
+            )
+        except (AttributeError, DossierError, TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except (
+            CredentialStoreError,
+            NetworkAccessDenied,
+            OperationDeadlineExceeded,
+            PropertyCacheError,
+            PropertyConnectorError,
+        ) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        return JSONResponse(dossier, status_code=201)
+
+    @app.get("/api/v1/dossiers/{dossier_id}")
+    def get_dossier(dossier_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(
+                PropertyDossierService(storage).get_observation(dossier_id)
+            )
+        except DossierError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.post("/api/v1/dossiers/{dossier_id}/export")
+    def export_dossier(dossier_id: str) -> JSONResponse:
+        try:
+            path = PropertyDossierService(storage).export(
+                dossier_id, context.paths.exports
+            )
+        except DossierError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse(
+            {"filename": path.name, "download_url": f"/api/v1/exports/{path.name}"}
+        )
+
+    # Rich extraction ----------------------------------------------------------
+    @app.post("/api/v1/resources/{resource_id}/extraction-jobs")
+    async def create_extraction_run(resource_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "operation",
+                "pages",
+                "languages",
+            }:
+                raise CorpusValidationError(
+                    "Extraction request contains unsupported fields."
+                )
+            pages = payload.get("pages")
+            languages = payload.get("languages")
+            if pages is not None and (
+                not isinstance(pages, list)
+                or not all(isinstance(item, int) for item in pages)
+            ):
+                raise CorpusValidationError(
+                    "pages must be a list of physical page numbers."
+                )
+            if languages is not None and (
+                not isinstance(languages, list)
+                or not all(isinstance(item, str) for item in languages)
+            ):
+                raise CorpusValidationError(
+                    "languages must be a list of language codes."
+                )
+            result = ExtractionService(storage).run(
+                resource_id,
+                operation=str(payload.get("operation", "inspect")),
+                pages=pages,
+                languages=languages,
+            )
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(
+            result, status_code=409 if result["status"] == "ocr_unavailable" else 201
+        )
+
+    @app.get("/api/v1/resources/{resource_id}/extraction-runs/{run_id}")
+    def get_extraction_run(resource_id: str, run_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(ExtractionService(storage).get(resource_id, run_id))
+        except CorpusValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    # Offline-readable urgent help --------------------------------------------
+    @app.get("/api/v1/help-resources")
+    def list_help_resources(
+        language: str = "en",
+        topic: str | None = None,
+        housing_context: str | None = None,
+    ) -> JSONResponse:
+        try:
+            result = HelpResourceService(storage).list(
+                language=language, topic=topic, housing_context=housing_context
+            )
+        except HelpCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse(result)
+
+    @app.post("/api/v1/help-resources/match")
+    async def match_help_resources(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "question",
+                "language",
+                "housing_context",
+            }:
+                raise HelpCatalogError(
+                    "Help match request contains unsupported fields."
+                )
+            result = HelpResourceService(storage).match(
+                str(payload.get("question", "")),
+                language=str(payload.get("language", "en")),
+                housing_context=payload.get("housing_context"),
+            )
+        except HelpCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(result)
+
+    @app.post("/api/v1/help-resources/feedback")
+    async def help_resource_feedback(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or set(payload) != {
+                "rule_ids",
+                "topic",
+                "helpful",
+            }:
+                raise HelpCatalogError("Help feedback request is invalid.")
+            if not isinstance(payload["rule_ids"], list) or not isinstance(
+                payload["helpful"], bool
+            ):
+                raise HelpCatalogError("Help feedback fields are invalid.")
+            result = HelpResourceService(storage).feedback(
+                rule_ids=payload["rule_ids"],
+                topic=str(payload["topic"]),
+                helpful=payload["helpful"],
+            )
+        except HelpCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(result, status_code=201)
+
+    # Optional fully-offline extension boundary -------------------------------
+    @app.get("/api/v1/offline/readiness")
+    def offline_readiness() -> JSONResponse:
+        try:
+            return JSONResponse(OfflineExtensionService(context, storage).readiness())
+        except OfflineExtensionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @app.post("/api/v1/extensions/{extension_id}/jobs")
+    async def offline_extension_job(
+        extension_id: str, request: Request
+    ) -> JSONResponse:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "operation",
+                "apply",
+            }:
+                raise OfflineExtensionError(
+                    "Extension request contains unsupported fields."
+                )
+            operation = str(payload.get("operation", "check"))
+            service = OfflineExtensionService(context, storage)
+            if operation == "check":
+                result = service.check(extension_id)
+            elif operation == "install":
+                result = service.install_unavailable(extension_id)
+            elif operation == "remove":
+                result = service.removal(
+                    extension_id, apply=payload.get("apply") is True
+                )
+            else:
+                raise OfflineExtensionError("Unsupported extension operation.")
+        except OfflineExtensionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(
+            result, status_code=409 if result.get("state") == "blocked" else 200
+        )
+
+    @app.get("/api/v1/data/snapshots")
+    def list_data_snapshots() -> JSONResponse:
+        return JSONResponse(
+            {"snapshots": OfflineExtensionService(context, storage).snapshots()}
+        )
+
+    @app.post("/api/v1/data/analytics")
+    async def data_analytics(request: Request) -> JSONResponse:
+        # Consume and validate JSON even while the reviewed adapter is unavailable;
+        # arbitrary SQL is never accepted.
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or not set(payload) <= {
+                "template",
+                "parameters",
+                "snapshot_id",
+            }:
+                raise OfflineExtensionError("Analytics request is invalid.")
+        except (AttributeError, OfflineExtensionError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse(
+            OfflineExtensionService(context, storage).analytics_unavailable(),
+            status_code=409,
+        )
+
     return app
 
 
@@ -1651,9 +2326,7 @@ def _store_credential(
         "credential",
         "storage",
     }:
-        raise CredentialStoreError(
-            "Credential request contains unsupported fields."
-        )
+        raise CredentialStoreError("Credential request contains unsupported fields.")
     value = validate_credential(provider, str(payload.get("credential", "")))
     backend = str(payload.get("storage", "keyring"))
     CredentialResolver(context).writable(backend).set(provider, value)

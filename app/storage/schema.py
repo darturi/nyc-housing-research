@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 
 CORPUS_SCHEMA_VERSION = 2
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 
 corpus_metadata = MetaData()
 state_metadata = MetaData()
@@ -380,4 +380,201 @@ launcher_tokens = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("consumed_at", DateTime(timezone=True)),
+)
+
+# User-owned research records live in the state database.  They deliberately do
+# not use foreign keys into the corpus database: retained evidence must remain
+# readable after a corpus version is removed or a generation changes.
+matters = Table(
+    "matters",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("title", String(255), nullable=False),
+    Column("description", Text, nullable=False, default="", server_default=""),
+    Column("tags_json", Text, nullable=False, default="[]", server_default="[]"),
+    Column("archived", Boolean, nullable=False, default=False, server_default="0"),
+    Column("revision", Integer, nullable=False, default=1, server_default="1"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+saved_items = Table(
+    "saved_items",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("kind", String(40), nullable=False, index=True),
+    Column("payload_version", Integer, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("payload_hash", String(64), nullable=False, index=True),
+    Column("source_identity", String(255), nullable=False, index=True),
+    Column("original_operation_id", String(64), index=True),
+    Column("parent_item_id", String(36), ForeignKey("saved_items.id")),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+matter_items = Table(
+    "matter_items",
+    state_metadata,
+    Column(
+        "matter_id",
+        String(36),
+        ForeignKey("matters.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "item_id",
+        String(36),
+        ForeignKey("saved_items.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("display_order", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+matter_notes = Table(
+    "matter_notes",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("matter_id", String(36), ForeignKey("matters.id", ondelete="CASCADE")),
+    Column("item_id", String(36), ForeignKey("saved_items.id", ondelete="CASCADE")),
+    Column("body", Text, nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+save_receipts = Table(
+    "save_receipts",
+    state_metadata,
+    Column("idempotency_key", String(160), primary_key=True),
+    Column("source_identity", String(255), nullable=False),
+    Column("item_id", String(36), ForeignKey("saved_items.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+source_comparisons = Table(
+    "source_comparisons",
+    state_metadata,
+    Column("id", String(64), primary_key=True),
+    Column("module_slug", String(160), nullable=False, index=True),
+    Column("baseline_version_id", String(36), nullable=False),
+    Column("target_version_id", String(36), nullable=False),
+    Column("normalization_version", String(40), nullable=False),
+    Column("matcher_version", String(40), nullable=False),
+    Column("status", String(40), nullable=False),
+    Column("counts_json", Text, nullable=False),
+    Column("warning", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "module_slug",
+        "baseline_version_id",
+        "target_version_id",
+        "normalization_version",
+        "matcher_version",
+        name="uq_source_comparison_inputs",
+    ),
+)
+
+comparison_changes = Table(
+    "comparison_changes",
+    state_metadata,
+    Column("id", String(64), primary_key=True),
+    Column(
+        "comparison_id",
+        String(64),
+        ForeignKey("source_comparisons.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("canonical_key", String(512), nullable=False),
+    Column("classification", String(40), nullable=False, index=True),
+    Column("old_json", Text),
+    Column("new_json", Text),
+    Column("diff_text", Text),
+    Column("certainty", String(40), nullable=False),
+    UniqueConstraint("comparison_id", "canonical_key", name="uq_comparison_change_key"),
+)
+
+comparison_reviews = Table(
+    "comparison_reviews",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("item_id", String(36), ForeignKey("saved_items.id"), nullable=False),
+    Column(
+        "comparison_id",
+        String(64),
+        ForeignKey("source_comparisons.id"),
+        nullable=False,
+    ),
+    Column("note", Text, nullable=False, default="", server_default=""),
+    Column("reviewed_at", DateTime(timezone=True), nullable=False),
+)
+
+property_identities = Table(
+    "property_identities",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("entity_kind", String(40), nullable=False),
+    Column("display_address", Text, nullable=False),
+    Column("normalized_address", String(512), nullable=False, index=True),
+    Column("identifiers_json", Text, nullable=False),
+    Column("provenance_json", Text, nullable=False),
+    Column("revision", Integer, nullable=False, default=1, server_default="1"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+dossier_observations = Table(
+    "dossier_observations",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column(
+        "property_identity_id",
+        String(36),
+        ForeignKey("property_identities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("requested_panels_json", Text, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("payload_hash", String(64), nullable=False),
+    Column("observed_at", DateTime(timezone=True), nullable=False),
+)
+
+extraction_runs = Table(
+    "extraction_runs",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("resource_id", String(36), nullable=False, index=True),
+    Column("source_version_id", String(36), nullable=False),
+    Column("operation", String(40), nullable=False),
+    Column("status", String(40), nullable=False),
+    Column("report_json", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+help_feedback = Table(
+    "help_feedback",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("rule_ids_json", Text, nullable=False),
+    Column("topic", String(80), nullable=False),
+    Column("helpful", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+extension_installations = Table(
+    "extension_installations",
+    state_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("extension_id", String(160), nullable=False, index=True),
+    Column("kind", String(80), nullable=False),
+    Column("version", String(80), nullable=False),
+    Column("state", String(40), nullable=False),
+    Column("manifest_json", Text, nullable=False),
+    Column("artifact_uri", Text),
+    Column("size_bytes", Integer, nullable=False, default=0, server_default="0"),
+    Column("active", Boolean, nullable=False, default=False, server_default="0"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )

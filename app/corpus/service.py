@@ -8,11 +8,20 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import func, insert, select, text, update
 
-from app.corpus.manifests import SourceManifest, load_core_manifests
-from app.ingestion.amlegal_xml import hmc_xml_from_zip, parse_hmc_xml_sections
+from app.corpus.manifests import (
+    SourceManifest,
+    load_all_manifests,
+    load_core_manifests,
+)
+from app.ingestion.amlegal_xml import (
+    hmc_xml_from_zip,
+    parse_hmc_xml_sections,
+    parse_nyc_admin_xml_range_sections,
+)
 from app.ingestion.citations import (
     CitationCandidate,
     detect_citation_type,
@@ -91,7 +100,8 @@ class CorpusStatus:
 class CorpusService:
     def __init__(self, storage: LocalStorage) -> None:
         self._storage = storage
-        self._manifests = load_core_manifests()
+        self._manifests = load_all_manifests()
+        self._core_slugs = frozenset(load_core_manifests())
 
     @property
     def manifests(self) -> dict[str, SourceManifest]:
@@ -190,6 +200,89 @@ class CorpusService:
                     "Partial generation activation requires explicit approval."
                 )
             self._activate_in_transaction(connection, generation_id, _utc_now())
+
+    def check_artifacts(
+        self, artifacts: list[SourceArtifact]
+    ) -> list[dict[str, object]]:
+        """Validate downloaded artifacts and report changes without publishing."""
+        if not artifacts:
+            raise CorpusValidationError("No source artifacts were supplied.")
+        seen: set[str] = set()
+        parsed_sources: list[ParsedSource] = []
+        for artifact in artifacts:
+            if artifact.slug in seen:
+                raise CorpusValidationError(
+                    f"Duplicate source artifact: {artifact.slug}"
+                )
+            seen.add(artifact.slug)
+            manifest = self._manifests.get(artifact.slug)
+            if manifest is None:
+                raise CorpusValidationError(f"Unknown source: {artifact.slug}")
+            parsed = _parse_source(manifest, artifact)
+            _validate_source(parsed)
+            parsed_sources.append(parsed)
+
+        results: list[dict[str, object]] = []
+        with self._storage.corpus_engine.begin() as connection:
+            active = connection.scalar(
+                select(corpus_state.c.active_generation_id).where(
+                    corpus_state.c.id == 1
+                )
+            )
+            for parsed in parsed_sources:
+                active_version = None
+                if active is not None:
+                    active_version = (
+                        connection.execute(
+                            select(
+                                source_versions.c.id,
+                                source_versions.c.content_hash,
+                            )
+                            .select_from(
+                                generation_sources.join(
+                                    source_versions,
+                                    source_versions.c.id
+                                    == generation_sources.c.source_version_id,
+                                ).join(
+                                    source_modules,
+                                    source_modules.c.id
+                                    == source_versions.c.source_module_id,
+                                )
+                            )
+                            .where(
+                                generation_sources.c.generation_id == active,
+                                source_modules.c.slug == parsed.manifest.slug,
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                state = "not_installed"
+                if active_version is not None:
+                    state = (
+                        "current"
+                        if active_version["content_hash"] == parsed.content_hash
+                        else "update_available"
+                    )
+                    connection.execute(
+                        update(source_versions)
+                        .where(source_versions.c.id == active_version["id"])
+                        .values(last_checked_at=parsed.artifact.retrieved_at)
+                    )
+                results.append(
+                    {
+                        "slug": parsed.manifest.slug,
+                        "state": state,
+                        "active_content_hash": (
+                            active_version["content_hash"]
+                            if active_version is not None
+                            else None
+                        ),
+                        "checked_content_hash": parsed.content_hash,
+                        "checked_at": parsed.artifact.retrieved_at.isoformat(),
+                    }
+                )
+        return results
 
     def rollback(self) -> str:
         with self._storage.corpus_engine.begin() as connection:
@@ -463,6 +556,18 @@ class CorpusService:
                         .one_or_none()
                     )
                 checked = _aware(row["last_checked_at"]) if row else None
+                retained_version_id = connection.scalar(
+                    select(source_versions.c.id)
+                    .select_from(
+                        source_versions.join(
+                            source_modules,
+                            source_modules.c.id == source_versions.c.source_module_id,
+                        )
+                    )
+                    .where(source_modules.c.slug == slug)
+                    .order_by(source_versions.c.retrieved_at.desc())
+                    .limit(1)
+                )
                 result.append(
                     {
                         "slug": slug,
@@ -473,7 +578,11 @@ class CorpusService:
                         "source_url": manifest.source_url,
                         "license_status": manifest.license_status,
                         "redistribution_allowed": manifest.redistribution_allowed,
+                        "role": manifest.role,
+                        "pack_id": manifest.pack_id,
+                        "authority_category": manifest.authority_category,
                         "installed": row is not None,
+                        "retained_version_available": retained_version_id is not None,
                         "active_version_id": row["id"] if row else None,
                         "content_hash": row["content_hash"] if row else None,
                         "retrieved_at": (
@@ -489,6 +598,72 @@ class CorpusService:
                     }
                 )
         return result
+
+    def remove_sources(self, slugs: list[str]) -> str:
+        selected = self._validated_optional_slugs(slugs)
+        with self._storage.corpus_engine.begin() as connection:
+            versions = self._active_versions_by_slug(connection)
+            installed = sorted(set(selected) & set(versions))
+            if not installed:
+                raise CorpusValidationError(
+                    "None of the selected sources is installed."
+                )
+            for slug in installed:
+                versions.pop(slug)
+            return self._publish_generation(
+                connection,
+                versions,
+                allow_partial=True,
+                activate=True,
+                now=_utc_now(),
+            )
+
+    def restore_sources(self, slugs: list[str]) -> str:
+        selected = self._validated_optional_slugs(slugs)
+        with self._storage.corpus_engine.begin() as connection:
+            versions = self._active_versions_by_slug(connection)
+            restored: list[str] = []
+            for slug in selected:
+                module_id = connection.scalar(
+                    select(source_modules.c.id).where(source_modules.c.slug == slug)
+                )
+                if module_id is None:
+                    continue
+                version_id = connection.scalar(
+                    select(source_versions.c.id)
+                    .where(source_versions.c.source_module_id == module_id)
+                    .order_by(source_versions.c.retrieved_at.desc())
+                    .limit(1)
+                )
+                if version_id is not None:
+                    versions[slug] = version_id
+                    restored.append(slug)
+            if not restored:
+                raise CorpusValidationError(
+                    "No retained version is available for the selected sources."
+                )
+            return self._publish_generation(
+                connection,
+                versions,
+                allow_partial=True,
+                activate=True,
+                now=_utc_now(),
+            )
+
+    def _validated_optional_slugs(self, slugs: list[str]) -> list[str]:
+        selected = list(dict.fromkeys(slugs))
+        if not selected:
+            raise CorpusValidationError("Select at least one optional source.")
+        unknown = sorted(set(selected) - set(self._manifests))
+        if unknown:
+            raise CorpusValidationError("Unknown source(s): " + ", ".join(unknown))
+        core = sorted(set(selected) & self._core_slugs)
+        if core:
+            raise CorpusValidationError(
+                "Core sources cannot be removed or restored as pack modules: "
+                + ", ".join(core)
+            )
+        return selected
 
     def _active_versions_by_slug(self, connection) -> dict[str, str]:
         active = connection.scalar(
@@ -538,7 +713,7 @@ class CorpusService:
         activate: bool,
         now: datetime,
     ) -> str:
-        missing = sorted(set(self._manifests) - set(selected_versions))
+        missing = sorted(self._core_slugs - set(selected_versions))
         if missing and not allow_partial:
             raise CorpusValidationError(
                 "Core generation is missing source(s): " + ", ".join(missing)
@@ -742,6 +917,9 @@ class CorpusService:
                 provenance_json=json.dumps(
                     {
                         "origin": "core",
+                        "role": manifest.role,
+                        "pack_id": manifest.pack_id,
+                        "authority_category": manifest.authority_category,
                         "source_url": manifest.source_url,
                         "publisher": manifest.publisher,
                     },
@@ -904,6 +1082,27 @@ def _parse_source(manifest: SourceManifest, artifact: SourceArtifact) -> ParsedS
                 sections=tuple(parse_hmc_xml_sections(xml_content)),
             ),
         )
+    elif manifest.parser == "nyc_admin_xml_range":
+        section_start = str(manifest.raw.get("section_start", ""))
+        section_end = str(manifest.raw.get("section_end", ""))
+        if not section_start or not section_end:
+            raise CorpusValidationError(
+                f"Administrative Code range is missing for {manifest.slug}."
+            )
+        parsed_documents = (
+            CanonicalDocument(
+                stable_id=manifest.slug,
+                title=manifest.name,
+                source_url=manifest.source_url,
+                sections=tuple(
+                    parse_nyc_admin_xml_range_sections(
+                        artifact.content,
+                        section_start=section_start,
+                        section_end=section_end,
+                    )
+                ),
+            ),
+        )
     elif manifest.parser in {"state_law_pdf", "good_cause_pdf"}:
         raw_text = artifact_bytes_to_text(
             artifact.content, artifact.content_type, artifact.source_url
@@ -921,12 +1120,16 @@ def _parse_source(manifest: SourceManifest, artifact: SourceArtifact) -> ParsedS
                 sections=tuple(sections),
             ),
         )
-    elif manifest.parser == "hpd_guidance_bundle":
+    elif manifest.parser in {"hpd_guidance_bundle", "curated_guidance_bundle"}:
         parsed_documents = tuple(
             CanonicalDocument(
                 stable_id=hashlib.sha256(page.url.encode()).hexdigest()[:24],
                 title=page.title,
-                source_url=canonical_guidance_url(page.url),
+                source_url=(
+                    canonical_guidance_url(page.url)
+                    if manifest.parser == "hpd_guidance_bundle"
+                    else _canonical_https_url(page.url)
+                ),
                 sections=tuple(
                     parse_hpd_guidance_page(page.url, page.title, page.html)
                 ),
@@ -1060,6 +1263,13 @@ def _artifact_extension(content_type: str | None, content: bytes) -> str:
     if normalized.startswith("text/"):
         return "txt"
     return "bin"
+
+
+def _canonical_https_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise CorpusValidationError("Guidance document URL must use HTTPS.")
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
 
 def _utc_now() -> datetime:

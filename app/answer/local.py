@@ -13,6 +13,8 @@ from app.answer.prompts import (
     PERSONAL_SCENARIO_INSTRUCTION,
     is_personal_housing_scenario,
 )
+from app.corpus.packs import SourcePackService
+from app.corpus.service import CorpusService
 from app.credentials.store import CredentialResolver, CredentialStoreError
 from app.jobs.runtime import CancellationSignal, Deadline
 from app.providers.gateway import ProviderExecutionError, ProviderGateway
@@ -83,7 +85,10 @@ class LocalAnswerResult:
     prompt_version: str
     cost_usd: str | None
     cost_known: bool
+    output_language: str = "en"
+    reading_style: str = "standard"
     model_excluded_source_count: int = 0
+    coverage_notices: tuple[dict[str, object], ...] = ()
     disclaimer: str = LEGAL_INFORMATION_DISCLAIMER
     error: str | None = None
 
@@ -114,6 +119,8 @@ class LocalAnswerService:
         | None = None,
         on_answer_delta: Callable[[str], None] | None = None,
         allow_unknown_cost: bool = False,
+        answer_language: str | None = None,
+        reading_style: str | None = None,
     ) -> LocalAnswerResult:
         question = " ".join(question.split())
         if not question or len(question) > 4_000:
@@ -121,7 +128,16 @@ class LocalAnswerService:
         if cancellation:
             cancellation.raise_if_cancelled()
         operation_id = operation_id or str(uuid.uuid4())
+        answer_language = answer_language or self._context.settings.answer_language
+        reading_style = reading_style or self._context.settings.reading_style
+        if answer_language not in {"en", "es"}:
+            raise ValueError("Answer language must be en or es.")
+        if reading_style not in {"standard", "plain"}:
+            raise ValueError("Reading style must be standard or plain.")
         requested_filters = filters or LocalSearchFilters(origin="core")
+        coverage_notices = tuple(
+            SourcePackService(CorpusService(self._storage)).coverage_for_query(question)
+        )
         generation_id = self._active_generation_id()
         total_sources, eligible_sources = self._scope_source_counts(
             generation_id, requested_filters
@@ -207,7 +223,10 @@ class LocalAnswerService:
                 prompt_version=LOCAL_ANSWER_PROMPT_VERSION,
                 cost_usd="0",
                 cost_known=True,
+                output_language=answer_language,
+                reading_style=reading_style,
                 model_excluded_source_count=excluded_sources,
+                coverage_notices=coverage_notices,
             )
         if _historical_coverage_unavailable(question, evidence):
             return LocalAnswerResult(
@@ -229,13 +248,22 @@ class LocalAnswerService:
                 prompt_version=LOCAL_ANSWER_PROMPT_VERSION,
                 cost_usd="0",
                 cost_known=True,
+                output_language=answer_language,
+                reading_style=reading_style,
                 model_excluded_source_count=excluded_sources,
+                coverage_notices=coverage_notices,
             )
         prompt = _prompt(
             question,
             evidence,
-            self._coverage_description(retrieval.generation_id, model_filters),
+            self._coverage_description(
+                retrieval.generation_id,
+                model_filters,
+                coverage_notices,
+            ),
             excluded_sources=excluded_sources,
+            answer_language=answer_language,
+            reading_style=reading_style,
         )
         try:
             credential, _source = self._credentials.resolve(
@@ -281,8 +309,11 @@ class LocalAnswerService:
                 cost_known=not (
                     allow_unknown_cost and not answer_profile.pricing_verified
                 ),
+                output_language=answer_language,
+                reading_style=reading_style,
                 error=str(exc),
                 model_excluded_source_count=excluded_sources,
+                coverage_notices=coverage_notices,
             )
         cited = _cited_evidence(response.text, evidence)
         status = "synthetic_demo" if answer_profile.provider == "fake" else "answered"
@@ -318,7 +349,10 @@ class LocalAnswerService:
                 str(response.cost_usd) if response.cost_usd is not None else None
             ),
             cost_known=response.cost_known,
+            output_language=answer_language,
+            reading_style=reading_style,
             model_excluded_source_count=excluded_sources,
+            coverage_notices=coverage_notices,
         )
 
     def _active_generation_id(self) -> str:
@@ -412,7 +446,10 @@ class LocalAnswerService:
         return total, eligible
 
     def _coverage_description(
-        self, generation_id: str, filters: LocalSearchFilters
+        self,
+        generation_id: str,
+        filters: LocalSearchFilters,
+        notices: tuple[dict[str, object], ...] = (),
     ) -> str:
         with self._storage.corpus_engine.connect() as connection:
             names = list(
@@ -435,7 +472,28 @@ class LocalAnswerService:
                     .order_by(source_modules.c.name)
                 )
             )
-        return "Selected evidence sources: " + ", ".join(names)
+        description = "Selected evidence sources: " + ", ".join(names)
+        partial = [
+            item
+            for item in notices
+            if item.get("coverage_status") == "partial_topic_coverage"
+        ]
+        if partial:
+            unavailable = [
+                str(module["name"])
+                for item in partial
+                for module in item.get("unavailable_modules", [])
+                if isinstance(module, dict) and module.get("name")
+            ]
+            unresolved = [
+                str(module)
+                for item in partial
+                for module in item.get("unresolved_catalog_modules", [])
+            ]
+            description += ". Partial topic coverage; missing: " + "; ".join(
+                [*unavailable, *unresolved]
+            )
+        return description
 
 
 def _evidence(
@@ -479,6 +537,8 @@ def _prompt(
     coverage: str,
     *,
     excluded_sources: int = 0,
+    answer_language: str = "en",
+    reading_style: str = "standard",
 ) -> str:
     blocks = []
     for item in evidence:
@@ -503,6 +563,21 @@ def _prompt(
     safety = (
         PERSONAL_SCENARIO_INSTRUCTION if is_personal_housing_scenario(question) else ""
     )
+    language_instruction = (
+        "Write the explanation in clear neutral Spanish. Keep source titles, legal "
+        "citations, numbers, dates, units, and [E#] markers unchanged. Where a "
+        "translated legal term may hide a distinction, include the English term "
+        "in parentheses. The English evidence remains the verification source."
+        if answer_language == "es"
+        else "Write the explanation in English."
+    )
+    style_instruction = (
+        "Use plain language and short sentences, defining legal terms as needed. "
+        "Do not omit thresholds, amounts, dates, exceptions, conditions, or the "
+        "difference between must and may. Label examples as hypothetical."
+        if reading_style == "plain"
+        else "Use a standard legal-information reading style."
+    )
     return "\n\n".join(
         [
             "Provide general NYC housing-law information using only the "
@@ -511,6 +586,8 @@ def _prompt(
             "Cite claims inline only with exact markers such as [E1] and [E2].",
             "If evidence is insufficient, say so. Preserve qualifications "
             "and exceptions.",
+            language_instruction,
+            style_instruction,
             safety,
             f"Question: {question}",
             f"Coverage: {coverage}",
