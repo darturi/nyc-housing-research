@@ -16,6 +16,7 @@ from app.corpus.manifests import load_core_manifests
 from app.corpus.service import CorpusService, SourceArtifact
 from app.jobs.service import JobService, JobState
 from app.launcher import (
+    LocalApplicationServer,
     _open_browser_or_print_code,
     bind_loopback,
     prepare_sources,
@@ -239,6 +240,19 @@ def test_occupied_default_port_falls_back_but_explicit_port_fails():
         with pytest.raises(ValueError, match="--port"):
             with bind_loopback(port, allow_fallback=False):
                 pytest.fail("Explicit occupied port should fail")
+
+
+def test_background_server_serves_and_stops(context):
+    storage = prepare_workspace(context)
+    storage.close()
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with LocalApplicationServer(context, port=port) as runtime:
+        runtime.start_background()
+        response = httpx.get(runtime.url, trust_env=False)
+        assert response.status_code == 200
+        assert runtime.launch_url.startswith(runtime.url + "#launch=")
 
 
 @pytest.mark.parametrize("failure", [False, OSError("No desktop")])

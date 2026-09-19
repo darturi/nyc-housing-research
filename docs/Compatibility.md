@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | Python | 3.12 | Other minors are rejected/not advertised |
 | Workspace format | 1 | Unknown format must be opened by compatible code |
-| Corpus schema | 1 | Unknown/newer version fails startup; no automatic downgrade |
+| Corpus schema | 2 | Unknown/newer version fails startup; no automatic downgrade |
 | State schema | 1 | Must match corpus schema pair; no partial compatibility claim |
 | Canonical bundle | 1 | Unknown version/member type fails before mutation |
 | Workspace backup | 1 | Restores only into a nonexistent selected destination |

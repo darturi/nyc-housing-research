@@ -7,9 +7,10 @@ import os
 import socket
 import sqlite3
 import sys
+import threading
 import time
 import webbrowser
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -112,32 +113,37 @@ def prepare_workspace(context: WorkspaceContext) -> LocalStorage:
         raise
 
 
-def prepare_sources(context: WorkspaceContext, storage: LocalStorage) -> bool:
+def prepare_sources(
+    context: WorkspaceContext,
+    storage: LocalStorage,
+    *,
+    progress: Callable[[str], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> bool:
     """Only an empty workspace needs automatic, free source installation."""
+    report = progress or (lambda message: print(message, flush=True))
+    is_cancelled = cancelled or (lambda: False)
     service = CorpusService(storage)
     status = service.status()
     if status.active_generation_id:
-        print(
+        report(
             f"Your installed sources are ready ({status.chunk_count} passages)."
             + (
                 " This is a partial library; add sources in the browser."
                 if status.is_partial
                 else ""
-            ),
-            flush=True,
+            )
         )
         return True
     if context.settings.offline:
-        print(
-            "Offline mode: source downloads skipped. Install sources when online.",
-            flush=True,
+        report(
+            "Offline mode: source downloads skipped. Install sources when online."
         )
         return True
 
-    print(
+    report(
         "Downloading five official publications for free local search. "
-        "This contacts their publishers and makes no paid model requests.",
-        flush=True,
+        "This contacts their publishers and makes no paid model requests."
     )
     runner = CorpusMaintenanceJobs(context, storage)
     job = None
@@ -161,7 +167,7 @@ def prepare_sources(context: WorkspaceContext, storage: LocalStorage) -> bool:
                 JobState.FAILED,
             }
         ):
-            print("Retrying the unfinished source installation...", flush=True)
+            report("Retrying the unfinished source installation...")
             job = runner.resume(previous.id)
         else:
             job = runner.submit("install")
@@ -171,19 +177,19 @@ def prepare_sources(context: WorkspaceContext, storage: LocalStorage) -> bool:
             progress = (current.stage, current.progress_current, current.progress_total)
             if progress != last_progress:
                 if current.stage == "downloading_sources":
-                    print(
+                    report(
                         f"  Downloading publication {current.progress_current + 1}"
-                        f" of {current.progress_total or 5}...",
-                        flush=True,
+                        f" of {current.progress_total or 5}..."
                     )
                 elif current.stage == "parse_and_activate":
-                    print(
-                        "  Checking publications and building local search...",
-                        flush=True,
-                    )
+                    report("  Checking publications and building local search...")
                 last_progress = progress
             if current.state not in {JobState.QUEUED, JobState.RUNNING}:
                 break
+            if is_cancelled():
+                runner.cancel(job.id)
+                runner.wait(job.id)
+                return False
             time.sleep(0.2)
         completed = runner.wait(job.id)
         if completed.state != JobState.SUCCEEDED:
@@ -191,10 +197,7 @@ def prepare_sources(context: WorkspaceContext, storage: LocalStorage) -> bool:
                 completed.error_message or "Source installation stopped."
             )
         verified = service.verify()
-        print(
-            f"Free source search is ready ({verified['chunk_count']} passages).",
-            flush=True,
-        )
+        report(f"Free source search is ready ({verified['chunk_count']} passages).")
         return True
     except (SourceDownloadError, CorpusValidationError, JobConflict) as exc:
         print(f"Source setup needs attention: {exc}", file=sys.stderr, flush=True)
@@ -291,38 +294,123 @@ def _open_browser_or_print_code(url: str, token: str, *, open_browser: bool) -> 
         )
 
 
+class _ReadyServer(uvicorn.Server):
+    def __init__(self, config: uvicorn.Config) -> None:
+        super().__init__(config)
+        self.ready = threading.Event()
+        self.finished = threading.Event()
+        self.on_started: Callable[[], None] | None = None
+
+    async def startup(self, sockets=None):
+        await super().startup(sockets=sockets)
+        if self.started:
+            self.ready.set()
+            if self.on_started is not None:
+                self.on_started()
+
+
+class LocalApplicationServer:
+    """Own one loopback listener and the lifetime of its ASGI application."""
+
+    def __init__(
+        self,
+        context: WorkspaceContext,
+        *,
+        port: int | None = None,
+    ) -> None:
+        self.context = context
+        self.port = port
+        self.url = ""
+        self.launch_url = ""
+        self._listener_context = None
+        self._listener: socket.socket | None = None
+        self._server: _ReadyServer | None = None
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> LocalApplicationServer:
+        from app.local_app import create_local_app
+
+        chosen_port = self.context.settings.port if self.port is None else self.port
+        self._listener_context = bind_loopback(
+            chosen_port, allow_fallback=self.port is None
+        )
+        self._listener = self._listener_context.__enter__()
+        try:
+            application = create_local_app(self.context)
+        except BaseException:
+            self._listener_context.__exit__(*sys.exc_info())
+            self._listener_context = None
+            self._listener = None
+            raise
+        actual_port = self._listener.getsockname()[1]
+        self.url = f"http://127.0.0.1:{actual_port}/"
+        self.launch_url = f"{self.url}#launch={application.state.launch_token}"
+        self._server = _ReadyServer(
+            uvicorn.Config(
+                application,
+                host="127.0.0.1",
+                port=actual_port,
+                workers=1,
+                log_level="warning",
+                access_log=False,
+            )
+        )
+        return self
+
+    def run(self, *, on_started: Callable[[], None] | None = None) -> bool:
+        if self._server is None or self._listener is None:
+            raise RuntimeError("The local application server is not open.")
+        self._server.on_started = on_started
+        try:
+            self._server.run(sockets=[self._listener])
+        finally:
+            self._server.finished.set()
+        return self._server.started
+
+    def start_background(self, *, timeout: float = 15) -> None:
+        if self._server is None:
+            raise RuntimeError("The local application server is not open.")
+        if self._thread is not None:
+            raise RuntimeError("The local application server has already started.")
+        self._thread = threading.Thread(
+            target=self.run,
+            name="nyc-housing-local-server",
+            daemon=False,
+        )
+        self._thread.start()
+        if not self._server.ready.wait(timeout):
+            self.stop()
+            raise LocalSettingsError("The local application server did not start.")
+
+    def stop(self, *, timeout: float = 15) -> None:
+        if self._server is not None:
+            self._server.should_exit = True
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout)
+            if self._thread.is_alive() and self._server is not None:
+                self._server.force_exit = True
+                self._thread.join(5)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.stop()
+        if self._listener_context is not None:
+            self._listener_context.__exit__(exc_type, exc_value, traceback)
+        self._listener_context = None
+        self._listener = None
+
+
 def serve_workspace(
     context: WorkspaceContext,
     *,
     port: int | None = None,
     no_browser: bool = False,
 ) -> int:
-    from app.local_app import create_local_app
-
-    chosen_port = context.settings.port if port is None else port
-    with bind_loopback(chosen_port, allow_fallback=port is None) as listener:
-        application = create_local_app(context)
-        url = f"http://127.0.0.1:{listener.getsockname()[1]}/"
-
-        class BrowserServer(uvicorn.Server):
-            async def startup(self, sockets=None):
-                await super().startup(sockets=sockets)
-                if self.started:
-                    _open_browser_or_print_code(
-                        url,
-                        application.state.launch_token,
-                        open_browser=context.settings.open_browser and not no_browser,
-                    )
-
-        server = BrowserServer(
-            uvicorn.Config(
-                application,
-                host="127.0.0.1",
-                port=listener.getsockname()[1],
-                workers=1,
-                log_level="warning",
-                access_log=False,
+    with LocalApplicationServer(context, port=port) as runtime:
+        started = runtime.run(
+            on_started=lambda: _open_browser_or_print_code(
+                runtime.url,
+                runtime.launch_url.rsplit("#launch=", 1)[1],
+                open_browser=context.settings.open_browser and not no_browser,
             )
         )
-        server.run(sockets=[listener])
-        return 0 if server.started else 3
+        return 0 if started else 3

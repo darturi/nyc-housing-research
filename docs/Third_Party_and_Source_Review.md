@@ -10,7 +10,7 @@ package/source and the publisher terms in force at publication time.
 
 ## Locked Python graph
 
-`uv.lock` resolves 64 packages across core, credentials, legacy, and development
+`uv.lock` resolves 79 packages across core, desktop, credentials, legacy, and development
 extras. The direct dependencies and the license expressions/classifiers visible
 in the locally installed distribution metadata are:
 
@@ -27,6 +27,9 @@ in the locally installed distribution metadata are:
 | Core | SQLAlchemy | 2.0.51 | MIT |
 | Core | Uvicorn | 0.49.0 | BSD-3-Clause |
 | Credentials | keyring | 25.7.0 | Verify installed license file |
+| Desktop | pywebview | 6.2.1 | BSD-3-Clause |
+| Desktop build | py2app | 0.28.10 | MIT or PSF |
+| Desktop runtime | PyObjC family | 12.2.2 | Verify bundled license files |
 | Legacy/dev | argon2-cffi | 25.1.0 | MIT |
 | Legacy/dev | boto3 | 1.43.46 | Apache-2.0 |
 | Legacy/dev | psycopg / psycopg-binary | 3.3.4 | LGPL-3.0-only |

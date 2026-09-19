@@ -26,6 +26,11 @@ nyc-housing = "app.cli.main:main"
 credentials = [
     "keyring>=25.0.0",
 ]
+desktop = [
+    "keyring>=25.0.0",
+    "py2app>=0.28.10,<0.29; sys_platform == 'darwin'",
+    "pywebview>=6.2.1,<7; sys_platform == 'darwin'",
+]
 legacy = [
     "argon2-cffi>=23.1.0",
     "boto3>=1.35.0",

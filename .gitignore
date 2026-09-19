@@ -55,3 +55,6 @@ cookies.txt
 
 # Scratch files
 docs/scratch
+
+# Local feature specifications
+/docs/feature-specifications/

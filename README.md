@@ -29,6 +29,18 @@ Citywide HPD analytics, a complete offline HPD snapshot, fully local models,
 saved research history, and Docker are independent optional extensions—not L1
 requirements.
 
+## Standalone macOS application
+
+The project can also be distributed as a drag-to-Applications DMG. The macOS
+application bundles Python and the required dependencies, opens the same interface
+in a native WebKit window, and uses the same workspace as the browser launcher.
+Users do not need Git, Python, uv, or a terminal. Replacing the application with a
+newer release preserves the workspace under Application Support.
+
+The DMG is an additional build of this same codebase, not a separate frontend or
+service. See [macOS application distribution](docs/macOS_Application_Distribution.md)
+for local builds, Developer ID signing, notarization, and release verification.
+
 ## Quick start from a clone
 
 After cloning, open a terminal in the repository and run one command.
@@ -151,6 +163,7 @@ technical screen and the report remains `domain_review_required`.
 ## Documentation
 
 - [Setup and first run](docs/Setup.md)
+- [macOS application distribution](docs/macOS_Application_Distribution.md)
 - [Coverage and limitations](docs/Coverage.md)
 - [Privacy and data flow](docs/Privacy_and_Data_Flow.md)
 - [Costs and budgets](docs/Costs.md)

@@ -1,2 +1,5 @@
 include start.sh start.ps1 .python-version uv.lock
 include docs/Setup.md docs/Troubleshooting.md docs/One_Command_Setup_Plan.md
+include docs/macOS_Application_Distribution.md
+include scripts/build_macos_dmg.sh
+recursive-include packaging/macos *.py *.plist *.svg
