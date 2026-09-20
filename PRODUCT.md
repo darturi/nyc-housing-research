@@ -8,7 +8,10 @@ web
 
 ## Users
 
-People researching New York City housing law and HPD property violations in a private, local workspace. The primary user's exact professional role remains an open decision.
+NYC tenants, housing advocates, legal-services staff, and researchers who need to
+find and verify New York City housing-law sources or bounded HPD property records
+in a private, local workspace. The application supports research and source
+review; it does not replace individualized legal advice.
 
 ## Product Purpose
 
@@ -37,7 +40,11 @@ The product name is NYC Housing Research. Its voice is precise, plainspoken, cau
 
 ## Evidence on Hand
 
-The repository contains real interface copy, official-source metadata, local workspace status, cited search results, HPD result structures, and release-readiness documentation. It does not contain testimonials, customer claims, or a public-facing brand asset system; future work must not fabricate them.
+The repository contains real interface copy, official-source metadata, local
+workspace status, cited search results, HPD result structures, and
+release-readiness documentation. Public claims should remain grounded in that
+evidence; the project does not currently present testimonials or customer-impact
+claims.
 
 ## Product Principles
 

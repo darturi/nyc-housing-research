@@ -224,6 +224,7 @@ to assess the completed judgments. See the
 - [Troubleshooting and recovery](docs/Troubleshooting.md)
 - [Legacy migration](docs/Migration.md)
 - [Contributing](docs/Contributing.md)
+- [Security policy](SECURITY.md)
 - [Third-party and source review inventory](docs/Third_Party_and_Source_Review.md)
 - [Current beta-batch readiness](docs/Release_Readiness/2026-09-20_Beta_Batch.md)
 - [Recovery and interrupted-upgrade follow-up](docs/Release_Readiness/2026-09-20_Recovery_Batch.md)

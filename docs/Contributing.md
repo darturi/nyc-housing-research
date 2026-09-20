@@ -58,8 +58,11 @@ exports, private migration bundles, or diagnostic material containing addresses.
 
 ## Release discipline
 
-Public repository creation, remote changes, commits, pushes, release publication,
-corpus redistribution, hosted-system deletion, and credential rotation require
-explicit maintainer actions. A code license is still required before an open-source
-release. Keep unsupported-platform, legal-review, and live-contract gaps visible
-in the acceptance report rather than converting them to inspection-only passes.
+Remote changes, pushes, release publication, corpus redistribution,
+hosted-system deletion, and credential rotation require explicit maintainer
+actions. The project's original code and documentation are licensed under
+Apache-2.0; downloaded legal texts, government datasets, and dependencies remain
+subject to their own terms. Keep unsupported-platform, legal-review, and
+live-contract gaps visible in the acceptance report rather than converting them
+to inspection-only passes. Report potential vulnerabilities through the
+[security policy](../SECURITY.md), not a public issue containing sensitive detail.
