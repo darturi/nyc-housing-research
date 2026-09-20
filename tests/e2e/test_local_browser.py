@@ -171,6 +171,37 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
                 wait_until="networkidle",
             )
             page.locator("#application").wait_for(state="visible")
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.evaluate(
+                "document.documentElement.scrollWidth === window.innerWidth"
+            )
+            page.select_option("#ui-locale", "es")
+            page.locator('[data-view="research"]').click()
+            page.get_by_text("Infracciones de la propiedad", exact=True).wait_for()
+            assert page.locator("#question").get_attribute("placeholder") == (
+                "Ejemplo: ¿Qué calefacción debe proporcionar un propietario "
+                "durante el invierno?"
+            )
+            page.locator('[data-view="guide"]').click()
+            page.get_by_text(
+                "Investigación de vivienda en NYC respaldada por evidencia",
+                exact=False,
+            ).wait_for()
+            assert page.locator(".guide-aside").get_attribute("aria-label") == (
+                "Uso seguro del sitio"
+            )
+            page.get_by_role("button", name="Abrir asuntos", exact=True).wait_for()
+            assert page.evaluate(
+                "document.documentElement.scrollWidth === window.innerWidth"
+            )
+            page.select_option("#ui-locale", "en")
+            page.locator('[data-view="research"]').click()
+            page.get_by_text("Property violations", exact=True).wait_for()
+            page.set_viewport_size({"width": 1323, "height": 900})
+            assert page.evaluate(
+                "document.documentElement.scrollWidth === window.innerWidth"
+            )
+            page.locator('[data-view="sources"]').click()
             markdown = page.evaluate(
                 """() => {
                     const host = document.createElement("div");

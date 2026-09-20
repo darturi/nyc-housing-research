@@ -17,7 +17,7 @@
         </span>
       </div>
       <div class="topbar-status">
-        <label class="form-field" for="ui-locale"><span class="sr-only">Interface language</span><select id="ui-locale"><option value="en">English</option><option value="es">Español</option></select></label>
+        <label class="form-field" for="ui-locale"><span class="sr-only" data-i18n="interface.language">Interface language</span><select id="ui-locale"><option value="en" data-i18n="language.english">English</option><option value="es" data-i18n="language.spanish">Español</option></select></label>
         <span class="privacy-indicator"><span aria-hidden="true"></span><span data-i18n="privacy.local">Stays on this machine</span></span>
         <span class="route-badge" data-i18n="{% if offline %}mode.offline{% else %}mode.local{% endif %}">{% if offline %}offline mode{% else %}local mode{% endif %}</span>
       </div>
@@ -88,7 +88,7 @@
               <h2 id="research-title" data-i18n="research.title">Research the record</h2>
               <p data-i18n="research.description">Search installed public sources or request a provider-backed answer with citations.</p>
             </div>
-            <span class="local-action-badge">Local search is free</span>
+            <span class="local-action-badge" data-i18n="research.local_badge">Local search is free</span>
           </header>
           <div class="research-layout">
             <div class="research-primary">
@@ -96,30 +96,30 @@
                 <form id="research-form" class="query-form">
                   <div class="form-field question-field">
                     <label for="question" data-i18n="research.question">Question or search terms</label>
-                    <textarea id="question" maxlength="4000" required placeholder="Example: What heat must a landlord provide during winter?"></textarea>
+                    <textarea id="question" maxlength="4000" required placeholder="Example: What heat must a landlord provide during winter?" data-i18n-placeholder="research.placeholder"></textarea>
                   </div>
                   <div class="research-controls">
                     <div class="form-field">
                       <label for="research-mode" data-i18n="research.mode">Research mode</label>
                       <select id="research-mode">
-                        <option value="auto">Automatic (free)</option>
-                        <option value="search">Search sources only</option>
-                        <option value="answer">Answer with citations</option>
-                        <option value="property">Property lookup</option>
+                        <option value="auto" data-i18n="research.mode.auto">Automatic (free)</option>
+                        <option value="search" data-i18n="research.mode.search">Search sources only</option>
+                        <option value="answer" data-i18n="research.mode.answer">Answer with citations</option>
+                        <option value="property" data-i18n="research.mode.property">Property lookup</option>
                       </select>
                     </div>
                     <div class="form-field source-field">
                       <label for="research-source" data-i18n="research.source">Source filter</label>
                       <select id="research-source">
-                        <option value="">All installed sources</option>
+                        <option value="" data-i18n="research.source.all">All installed sources</option>
                       </select>
                     </div>
                     <div class="form-field">
                       <label for="research-scope" data-i18n="research.scope">Resource scope</label>
                       <select id="research-scope">
-                        <option value="core">Official only</option>
-                        <option value="user">My resources</option>
-                        <option value="all">Official + mine</option>
+                        <option value="core" data-i18n="research.scope.official">Official only</option>
+                        <option value="user" data-i18n="research.scope.mine">My resources</option>
+                        <option value="all" data-i18n="research.scope.all">Official + mine</option>
                       </select>
                     </div>
                     <div class="form-field">
@@ -135,12 +135,12 @@
                       <button id="answer-cancel" type="button" class="secondary-button" hidden data-i18n="answer.cancel">Cancel answer</button>
                     </div>
                   </div>
-                  <p class="form-footnote">Answer mode may send the question and selected excerpts to your chosen provider and records estimated cost locally.</p>
+                  <p class="form-footnote" data-i18n="research.footnote">Answer mode may send the question and selected excerpts to your chosen provider and records estimated cost locally.</p>
                 </form>
               </div>
               <div id="research-result" class="empty-state" aria-live="polite">
-                <strong>No evidence loaded</strong>
-                <span>Ask a question to inspect the installed public record.</span>
+                <strong data-i18n="research.empty.title">No evidence loaded</strong>
+                <span data-i18n="research.empty.body">Ask a question to inspect the installed public record.</span>
               </div>
               <section class="result-shell" aria-labelledby="help-resources-title">
                 <div class="panel-heading"><div><h2 id="help-resources-title" data-i18n="help.title">Get housing help</h2><p data-i18n="help.description">Official NYC contact and action pages, readable without a model.</p></div></div>
@@ -151,93 +151,93 @@
             <aside class="result-shell property-panel" aria-labelledby="property-title">
               <div class="panel-heading">
                 <div>
-                  <h2 id="property-title">Property violations</h2>
-                  <p>Search current NYC HPD records by address.</p>
+                  <h2 id="property-title" data-i18n="property.title">Property violations</h2>
+                  <p data-i18n="property.description">Search current NYC HPD records by address.</p>
                 </div>
-                <span class="network-badge">Network</span>
+                <span class="network-badge" data-i18n="property.network">Network</span>
               </div>
               <form id="property-form" class="query-form property-form">
                 <fieldset>
-                  <legend>Property address</legend>
+                  <legend data-i18n="property.address">Property address</legend>
                   <div class="property-address-grid">
                     <div class="form-field house-field">
-                      <label for="house-number">House no.</label>
+                      <label for="house-number" data-i18n="property.house_number">House no.</label>
                       <input id="house-number">
                     </div>
                     <div class="form-field street-field">
-                      <label for="street-name">Street name</label>
+                      <label for="street-name" data-i18n="property.street_name">Street name</label>
                       <input id="street-name">
                     </div>
                     <div class="form-field borough-field">
-                      <label for="borough">Borough</label>
+                      <label for="borough" data-i18n="property.borough">Borough</label>
                       <select id="borough">
-                        <option value="">Select</option>
+                        <option value="" data-i18n="common.select">Select</option>
                         <option>Manhattan</option><option>Bronx</option>
                         <option>Brooklyn</option><option>Queens</option>
                         <option>Staten Island</option>
                       </select>
                     </div>
                     <div class="form-field zip-field">
-                      <label for="zip-code">ZIP code</label>
+                      <label for="zip-code" data-i18n="property.zip_code">ZIP code</label>
                       <input id="zip-code" inputmode="numeric" maxlength="5">
                     </div>
                   </div>
                 </fieldset>
                 <details class="property-filters identifier-search">
-                  <summary>Search by official identifier</summary>
-                  <p class="form-footnote">Use this when you already know the building or HPD registration number.</p>
+                  <summary data-i18n="property.identifier.title">Search by official identifier</summary>
+                  <p class="form-footnote" data-i18n="property.identifier.help">Use this when you already know the building or HPD registration number.</p>
                   <div class="property-pair">
                     <div class="form-field">
-                      <label for="building-id">Building ID</label>
+                      <label for="building-id" data-i18n="property.building_id">Building ID</label>
                       <input id="building-id" inputmode="numeric">
                     </div>
                     <div class="form-field">
-                      <label for="registration-id">Registration ID</label>
+                      <label for="registration-id" data-i18n="property.registration_id">Registration ID</label>
                       <input id="registration-id" inputmode="numeric">
                     </div>
                   </div>
                 </details>
                 <details class="property-filters">
-                  <summary>Optional filters</summary>
+                  <summary data-i18n="property.filters">Optional filters</summary>
                   <div class="property-filter-grid">
                     <div class="form-field">
-                      <label for="violation-class">Class</label>
+                      <label for="violation-class" data-i18n="property.class">Class</label>
                       <select id="violation-class">
-                        <option value="">Any class</option>
+                        <option value="" data-i18n="property.class.any">Any class</option>
                         <option value="A">A</option><option value="B">B</option>
                         <option value="C">C</option><option value="I">I</option>
                       </select>
                     </div>
                     <div class="form-field">
-                      <label for="violation-status">Status</label>
+                      <label for="violation-status" data-i18n="property.status">Status</label>
                       <select id="violation-status">
-                        <option value="">Any status</option>
-                        <option value="open">Open</option>
-                        <option value="closed">Closed</option>
+                        <option value="" data-i18n="property.status.any">Any status</option>
+                        <option value="open" data-i18n="property.status.open">Open</option>
+                        <option value="closed" data-i18n="property.status.closed">Closed</option>
                       </select>
                     </div>
                     <div class="form-field">
-                      <label for="inspection-date-from">Inspected after</label>
+                      <label for="inspection-date-from" data-i18n="property.inspected_after">Inspected after</label>
                       <input id="inspection-date-from" type="date">
                     </div>
                     <div class="form-field">
-                      <label for="inspection-date-to">Inspected before</label>
+                      <label for="inspection-date-to" data-i18n="property.inspected_before">Inspected before</label>
                       <input id="inspection-date-to" type="date">
                     </div>
                   </div>
                 </details>
-                <button type="submit">Look up HPD records</button>
+                <button type="submit" data-i18n="property.lookup">Look up HPD records</button>
               </form>
-              <p class="property-caveat">A zero result is not proof that the building does not exist.</p>
+              <p class="property-caveat" data-i18n="property.caveat">A zero result is not proof that the building does not exist.</p>
               <div id="property-result" class="meta-line" aria-live="polite"></div>
               <div class="property-actions">
-                <button id="property-refresh" type="button" class="secondary-button" hidden>Refresh from HPD</button>
-                <button id="property-next" type="button" class="secondary-button" hidden>Next page</button>
-                <button id="property-summary" type="button" class="secondary-button" hidden>Summarize loaded page</button>
-                <button id="property-dossier" type="button" class="secondary-button" hidden>Create dossier snapshot</button>
-                <button id="property-export" type="button" class="secondary-button" hidden>Export loaded CSV</button>
-                <button id="property-export-complete" type="button" class="secondary-button" hidden>Export up to 20 pages</button>
-                <button id="property-export-cancel" type="button" class="secondary-button" hidden>Cancel full export</button>
+                <button id="property-refresh" type="button" class="secondary-button" hidden data-i18n="property.refresh">Refresh from HPD</button>
+                <button id="property-next" type="button" class="secondary-button" hidden data-i18n="property.next">Next page</button>
+                <button id="property-summary" type="button" class="secondary-button" hidden data-i18n="property.summary">Summarize loaded page</button>
+                <button id="property-dossier" type="button" class="secondary-button" hidden data-i18n="property.dossier">Create dossier snapshot</button>
+                <button id="property-export" type="button" class="secondary-button" hidden data-i18n="property.export.loaded">Export loaded CSV</button>
+                <button id="property-export-complete" type="button" class="secondary-button" hidden data-i18n="property.export.complete">Export up to 20 pages</button>
+                <button id="property-export-cancel" type="button" class="secondary-button" hidden data-i18n="property.export.cancel">Cancel full export</button>
               </div>
             </aside>
           </div>
@@ -520,63 +520,67 @@
         <section id="view-guide" class="app-view" aria-labelledby="guide-title" hidden>
           <header class="view-header">
             <div>
-              <h2 id="guide-title">How to use this desk</h2>
-              <p>A practical guide to finding evidence, checking property records, and knowing when information leaves this machine.</p>
+              <h2 id="guide-title" data-i18n="guide.title">How to use this desk</h2>
+              <p data-i18n="guide.description">A practical guide to finding evidence, organizing your work, checking property records, and knowing when information leaves this machine.</p>
             </div>
-            <span class="local-action-badge">Local-first guide</span>
+            <span class="local-action-badge" data-i18n="guide.badge">Local-first guide</span>
           </header>
 
           <div class="guide-layout">
             <div class="guide-main">
               <section class="result-shell guide-intro" aria-labelledby="guide-purpose-title">
-                <p class="guide-kicker">Purpose</p>
-                <h2 id="guide-purpose-title">Evidence-backed NYC housing research, in one private workspace.</h2>
-                <p class="guide-lead">
-                  Use this site to search installed housing-law sources, inspect the
-                  passages behind a result, and look up bounded NYC HPD violation
-                  records. It is designed for research you can verify—not for replacing
-                  an attorney or treating a generated answer as legal authority.
-                </p>
+                <p class="guide-kicker" data-i18n="guide.purpose.kicker">Purpose</p>
+                <h2 id="guide-purpose-title" data-i18n="guide.purpose.title">Evidence-backed NYC housing research, in one private workspace.</h2>
+                <p class="guide-lead" data-i18n="guide.purpose.body">Use this site to search official sources and your own files, inspect the passages behind a result, check bounded NYC HPD violation records, and save selected evidence in local matters. It is designed for research you can verify—not for replacing an attorney or treating a generated answer as legal authority.</p>
                 <div class="guide-actions">
-                  <button type="button" data-guide-target="research">Start researching</button>
-                  <button type="button" class="secondary-button" data-guide-target="sources">Prepare sources</button>
+                  <button type="button" data-guide-target="research" data-i18n="guide.action.research">Start researching</button>
+                  <button type="button" class="secondary-button" data-guide-target="sources" data-i18n="guide.action.sources">Prepare sources</button>
+                  <button type="button" class="secondary-button" data-guide-target="matters" data-i18n="guide.action.matters">Open matters</button>
                 </div>
               </section>
 
               <section class="guide-section" aria-labelledby="guide-workflow-title">
                 <div class="guide-section-heading">
-                  <p class="guide-kicker">Recommended workflow</p>
-                  <h2 id="guide-workflow-title">From question to verified source</h2>
-                  <p>Each step keeps the evidence and its boundaries visible.</p>
+                  <p class="guide-kicker" data-i18n="guide.workflow.kicker">Recommended workflow</p>
+                  <h2 id="guide-workflow-title" data-i18n="guide.workflow.title">From question to reusable research record</h2>
+                  <p data-i18n="guide.workflow.description">Each step keeps the evidence, provenance, and boundaries visible.</p>
                 </div>
                 <ol class="guide-steps">
                   <li>
                     <span class="guide-step-number" aria-hidden="true">01</span>
                     <div>
-                      <h3>Prepare the source library</h3>
-                      <p>Install the core publications once, then update them periodically. Source search is free and local after installation.</p>
-                      <button type="button" class="guide-text-action" data-guide-target="sources">Open Sources <span aria-hidden="true">&#8594;</span></button>
+                      <h3 data-i18n="guide.step.sources.title">Prepare the source library</h3>
+                      <p data-i18n="guide.step.sources.body">Install the core publications, add optional official source packs, or import PDF, DOCX, Markdown, and text files. Personal files are eligible for provider-backed features only when you allow it for that resource.</p>
+                      <button type="button" class="guide-text-action" data-guide-target="sources"><span data-i18n="guide.step.sources.action">Open Sources</span> <span aria-hidden="true">&#8594;</span></button>
                     </div>
                   </li>
                   <li>
                     <span class="guide-step-number" aria-hidden="true">02</span>
                     <div>
-                      <h3>Ask one specific question</h3>
-                      <p>Use a citation, legal topic, or plain-language question. For a building, enter its address and confirm the intended HPD record.</p>
+                      <h3 data-i18n="guide.step.question.title">Ask one specific question</h3>
+                      <p data-i18n="guide.step.question.body">Use a citation, legal topic, or plain-language question. Choose official sources, your resources, or both; answer language and reading style change the presentation, not the cited evidence.</p>
                     </div>
                   </li>
                   <li>
                     <span class="guide-step-number" aria-hidden="true">03</span>
                     <div>
-                      <h3>Choose the right research mode</h3>
-                      <p>Search locally for source text, use a provider only when you want a generated explanation, or choose property lookup for HPD records.</p>
+                      <h3 data-i18n="guide.step.mode.title">Choose the right research mode</h3>
+                      <p data-i18n="guide.step.mode.body">Automatic and source search stay free; generated answers use your provider; property lookup contacts NYC Open Data. Urgent-housing questions can also surface official help resources without a model.</p>
                     </div>
                   </li>
                   <li>
                     <span class="guide-step-number" aria-hidden="true">04</span>
                     <div>
-                      <h3>Read past the answer</h3>
-                      <p>Inspect cited excerpts, open the official publication, and check that the law is current before relying on a result.</p>
+                      <h3 data-i18n="guide.step.verify.title">Verify the evidence and identity</h3>
+                      <p data-i18n="guide.step.verify.body">Inspect cited excerpts, open the official publication, and check that the law is current. For property records, confirm the intended building before creating a dossier or export.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="guide-step-number" aria-hidden="true">05</span>
+                    <div>
+                      <h3 data-i18n="guide.step.save.title">Save only what matters</h3>
+                      <p data-i18n="guide.step.save.body">A matter preserves an immutable copy of explicitly saved evidence while its title, tags, description, and notes remain editable. A property dossier is a local snapshot tied to a confirmed identity.</p>
+                      <button type="button" class="guide-text-action" data-guide-target="matters"><span data-i18n="guide.step.save.action">Open Matters</span> <span aria-hidden="true">&#8594;</span></button>
                     </div>
                   </li>
                 </ol>
@@ -584,80 +588,85 @@
 
               <section class="result-shell guide-modes" aria-labelledby="guide-modes-title">
                 <div class="guide-section-heading">
-                  <p class="guide-kicker">Research modes</p>
-                  <h2 id="guide-modes-title">Choose by task and boundary</h2>
+                  <p class="guide-kicker" data-i18n="guide.modes.kicker">Research modes</p>
+                  <h2 id="guide-modes-title" data-i18n="guide.modes.title">Choose by task and boundary</h2>
                 </div>
                 <div class="mode-ledger" role="list">
                   <article class="mode-row" role="listitem">
-                    <div><span class="mode-index">A</span><h3>Automatic</h3></div>
-                    <p>Routes ordinary legal questions to installed sources and recognizes requests that belong in property lookup.</p>
-                    <span class="network-badge">Boundary varies</span>
+                    <div><span class="mode-index">A</span><h3 data-i18n="guide.mode.auto.title">Automatic</h3></div>
+                    <p data-i18n="guide.mode.auto.body">Classifies the request locally. It searches installed sources for free or sends a property request to the HPD panel; it never starts a paid answer.</p>
+                    <span class="network-badge" data-i18n="guide.mode.auto.badge">Local / network</span>
                   </article>
                   <article class="mode-row" role="listitem">
-                    <div><span class="mode-index">S</span><h3>Search sources only</h3></div>
-                    <p>Returns matching passages from the installed corpus without sending your question to a model provider.</p>
-                    <span class="local-action-badge">Local + free</span>
+                    <div><span class="mode-index">S</span><h3 data-i18n="guide.mode.search.title">Search sources only</h3></div>
+                    <p data-i18n="guide.mode.search.body">Returns matching passages from the selected official or personal resources without sending your question to a model provider.</p>
+                    <span class="local-action-badge" data-i18n="guide.mode.search.badge">Local + free</span>
                   </article>
                   <article class="mode-row" role="listitem">
-                    <div><span class="mode-index">C</span><h3>Answer with citations</h3></div>
-                    <p>Sends your question and selected excerpts to the configured provider to draft an explanation grounded in citations.</p>
-                    <span class="paid-badge">May charge</span>
+                    <div><span class="mode-index">C</span><h3 data-i18n="guide.mode.answer.title">Answer with citations</h3></div>
+                    <p data-i18n="guide.mode.answer.body">Sends your question and eligible excerpts to the configured provider. Spanish and plain-language controls change the explanation while preserving its cited evidence.</p>
+                    <span class="paid-badge" data-i18n="guide.mode.answer.badge">May charge</span>
                   </article>
                   <article class="mode-row" role="listitem">
-                    <div><span class="mode-index">P</span><h3>Property lookup</h3></div>
-                    <p>Queries NYC Open Data for HPD violations by address or official building identifier.</p>
-                    <span class="network-badge">Network</span>
+                    <div><span class="mode-index">P</span><h3 data-i18n="guide.mode.property.title">Property lookup</h3></div>
+                    <p data-i18n="guide.mode.property.body">Queries NYC Open Data for HPD violations by address or official identifier. Confirm the building before summarizing, creating a dossier, or exporting records.</p>
+                    <span class="network-badge" data-i18n="guide.mode.property.badge">Network</span>
                   </article>
                 </div>
               </section>
 
               <section class="result-shell guide-reading" aria-labelledby="guide-reading-title">
                 <div class="guide-section-heading">
-                  <p class="guide-kicker">Reading results</p>
-                  <h2 id="guide-reading-title">Three checks before you rely on anything</h2>
+                  <p class="guide-kicker" data-i18n="guide.reading.kicker">Reading results</p>
+                  <h2 id="guide-reading-title" data-i18n="guide.reading.title">Three checks before you rely on anything</h2>
                 </div>
                 <ol class="reading-checks">
-                  <li><strong>Citation</strong><span>Does the section or record actually match your question?</span></li>
-                  <li><strong>Context</strong><span>Read the full excerpt and nearby provisions, not only the summary.</span></li>
-                  <li><strong>Currency</strong><span>Open the official source and confirm the law or record is current.</span></li>
+                  <li><strong data-i18n="guide.reading.citation.title">Citation</strong><span data-i18n="guide.reading.citation.body">Does the section or property record actually match your question?</span></li>
+                  <li><strong data-i18n="guide.reading.context.title">Context</strong><span data-i18n="guide.reading.context.body">Read the full excerpt and nearby provisions, not only the generated summary.</span></li>
+                  <li><strong data-i18n="guide.reading.currency.title">Currency</strong><span data-i18n="guide.reading.currency.body">Open the official source and check its date or lookup time before relying on it.</span></li>
                 </ol>
               </section>
             </div>
 
-            <aside class="guide-aside" aria-label="Using the site safely">
+            <aside class="guide-aside" aria-label="Using the site safely" data-i18n-aria-label="guide.boundary.aria">
               <section class="result-shell boundary-panel" aria-labelledby="guide-boundaries-title">
-                <p class="guide-kicker">Before you act</p>
-                <h2 id="guide-boundaries-title">Know the boundary</h2>
+                <p class="guide-kicker" data-i18n="guide.boundary.kicker">Before you act</p>
+                <h2 id="guide-boundaries-title" data-i18n="guide.boundary.title">Know the boundary</h2>
                 <ul class="boundary-list">
                   <li>
-                    <span class="local-action-badge">Local</span>
-                    <p>Installed-source search and workspace records stay on this machine.</p>
+                    <span class="local-action-badge" data-i18n="guide.boundary.local.label">Local</span>
+                    <p data-i18n="guide.boundary.local.body">Installed-source search, imported files, matters, notes, and dossiers stay on this machine. Results are saved only when you explicitly choose to save them.</p>
                   </li>
                   <li>
-                    <span class="network-badge">Network</span>
-                    <p>Source updates and property lookup contact official external services.</p>
+                    <span class="network-badge" data-i18n="guide.boundary.network.label">Network</span>
+                    <p data-i18n="guide.boundary.network.body">Source installation and updates, live property lookup, and opening an official help link contact external services.</p>
                   </li>
                   <li>
-                    <span class="paid-badge">May charge</span>
-                    <p>Generated answers, summaries, and semantic indexing can use your provider key. Review estimates and limits first.</p>
+                    <span class="paid-badge" data-i18n="guide.boundary.paid.label">May charge</span>
+                    <p data-i18n="guide.boundary.paid.body">Generated answers, property summaries, and semantic indexing can use your provider key. Personal-resource excerpts are eligible only when you allowed provider use for that resource.</p>
+                  </li>
+                  <li>
+                    <span class="route-badge" data-i18n="guide.boundary.offline.label">Offline</span>
+                    <p data-i18n="guide.boundary.offline.body">Offline mode blocks new application-managed network requests. Installed sources and saved work remain available, but cached HPD pages are not a complete property snapshot.</p>
                   </li>
                 </ul>
-                <button type="button" class="secondary-button boundary-settings" data-guide-target="settings">Review privacy and spending</button>
+                <button type="button" class="secondary-button boundary-settings" data-guide-target="settings" data-i18n="guide.boundary.settings">Review privacy, offline mode, and spending</button>
               </section>
 
               <section class="guide-question-panel" aria-labelledby="guide-questions-title">
-                <p class="guide-kicker">Good starting questions</p>
-                <h2 id="guide-questions-title">Be concrete</h2>
+                <p class="guide-kicker" data-i18n="guide.questions.kicker">Good starting questions</p>
+                <h2 id="guide-questions-title" data-i18n="guide.questions.title">Be concrete</h2>
                 <ul class="question-examples">
-                  <li>What heat must a landlord provide during winter?</li>
-                  <li>Find the text of RPAPL section 711.</li>
-                  <li>Show open Class C violations at a specific address.</li>
+                  <li data-i18n="guide.questions.example.heat">What heat must a landlord provide during winter?</li>
+                  <li data-i18n="guide.questions.example.citation">Find the text of RPAPL section 711.</li>
+                  <li data-i18n="guide.questions.example.property">Show open Class C violations at a specific address.</li>
+                  <li data-i18n="guide.questions.example.help">I have no heat tonight. Where can I get official help?</li>
                 </ul>
               </section>
 
               <section class="guide-caution" aria-labelledby="guide-caution-title">
-                <h2 id="guide-caution-title">General legal information</h2>
-                <p>This site does not give legal advice. Deadlines, facts, and recent changes can alter the answer; verify the official record and consult qualified counsel when needed.</p>
+                <h2 id="guide-caution-title" data-i18n="guide.caution.title">General legal information</h2>
+                <p data-i18n="guide.caution.body">This site does not give legal advice. Deadlines, facts, and recent changes can alter the answer; verify the official record and consult qualified counsel when needed.</p>
               </section>
             </aside>
           </div>

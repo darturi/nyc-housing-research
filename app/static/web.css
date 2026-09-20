@@ -17,6 +17,18 @@
   box-sizing: border-box;
 }
 
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -499,11 +511,13 @@ dd {
   color: #dbe3ea;
   font-size: 0.78rem;
   font-weight: 650;
+  white-space: nowrap;
 }
 
-.local-app .privacy-indicator > span {
+.local-app .privacy-indicator > span:first-child {
   width: 7px;
   height: 7px;
+  flex: 0 0 7px;
   border-radius: 50%;
   background: #66d1b5;
   box-shadow: 0 0 0 3px rgba(102, 209, 181, 0.14);
@@ -853,10 +867,19 @@ dd {
 
 .local-app .research-controls {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 0.7fr) 120px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
   min-width: 0;
   gap: 12px;
+}
+
+.local-app .research-controls .source-field {
+  grid-column: span 2;
+}
+
+.local-app #setup-data-path {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .local-app .user-resources-panel {
@@ -2283,13 +2306,20 @@ dd {
   }
 }
 
+@media (min-width: 1181px) and (max-width: 1499px) {
+  .local-app .research-controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 920px) {
   .local-app .app-shell:not([hidden]) {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .local-app .workspace-rail {
     position: static;
+    min-width: 0;
     min-height: auto;
     max-height: none;
     overflow: visible;
@@ -2302,6 +2332,7 @@ dd {
 
   .local-app .local-nav {
     flex-direction: row;
+    min-width: 0;
     border: 0;
   }
 
@@ -2383,11 +2414,18 @@ dd {
     display: none;
   }
 
+  .local-app .local-nav {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
   .local-app .nav-button,
   .local-app .nav-button.secondary-button {
+    flex: 1 0 max-content;
     min-height: 50px;
     align-items: center;
-    padding: 0 10px;
+    padding: 0 8px;
+    white-space: nowrap;
   }
 
   .local-app .research-controls,
@@ -2400,6 +2438,10 @@ dd {
   .local-app .reading-checks,
   .local-app .guide-aside {
     grid-template-columns: 1fr;
+  }
+
+  .local-app .research-controls .source-field {
+    grid-column: auto;
   }
 
   .local-app .mode-row {
@@ -2496,6 +2538,37 @@ dd {
   .local-app .route-badge {
     padding: 0 7px;
     font-size: 0.63rem;
+  }
+
+  .local-app .local-nav {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+
+  .local-app .nav-button,
+  .local-app .nav-button.secondary-button {
+    width: 100%;
+    min-width: 0;
+    padding: 0 6px;
+    white-space: normal;
+  }
+
+  .local-app .nav-button:nth-child(-n + 3),
+  .local-app .nav-button.secondary-button:nth-child(-n + 3) {
+    grid-column: span 2;
+  }
+
+  .local-app .nav-button:nth-child(n + 4),
+  .local-app .nav-button.secondary-button:nth-child(n + 4) {
+    grid-column: span 3;
+  }
+
+  .local-app .nav-title {
+    font-size: 0.82rem;
+    line-height: 1.15;
+    text-align: center;
+    overflow-wrap: anywhere;
   }
 
   .local-app #research-result .answer-citation-guidance {

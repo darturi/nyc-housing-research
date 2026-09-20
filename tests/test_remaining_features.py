@@ -463,6 +463,9 @@ def test_remaining_feature_routes_share_local_session_boundary(tmp_path) -> None
         locale = client.get("/api/v1/locales/es")
         assert locale.status_code == 200
         assert locale.json()["locale"] == "es"
+        assert locale.json()["messages"]["guide.title"] == (
+            "Cómo usar esta mesa de investigación"
+        )
 
         session = client.post(
             "/api/v1/session/exchange",

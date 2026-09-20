@@ -8,19 +8,30 @@ let selectedCredentialSlot = "openai";
 let selectedCredentialIsCustom = false;
 let selectedAnswerPricingVerified = true;
 let currentLocale = document.documentElement.lang || "en";
+let localeMessages = {};
 let matterCache = [];
 const byId = (id) => document.getElementById(id);
+const localizedText = (key, fallback) => localeMessages[key] || fallback;
 
 async function applyLocale(locale, {persist = false} = {}) {
   const response = await fetch(`/api/v1/locales/${encodeURIComponent(locale)}`);
   if (!response.ok) throw new Error("Could not load the interface language.");
   const catalog = await response.json();
   currentLocale = catalog.locale;
+  localeMessages = catalog.messages;
   document.documentElement.lang = currentLocale;
   byId("ui-locale").value = currentLocale;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
     const translated = catalog.messages[element.dataset.i18n];
     if (translated) element.textContent = translated;
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+    const translated = catalog.messages[element.dataset.i18nPlaceholder];
+    if (translated) element.setAttribute("placeholder", translated);
+  });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+    const translated = catalog.messages[element.dataset.i18nAriaLabel];
+    if (translated) element.setAttribute("aria-label", translated);
   });
   if (persist && csrfToken) {
     await api("/api/v1/settings", {
@@ -784,7 +795,11 @@ async function loadSources() {
   filter.replaceChildren();
   const allSources = document.createElement("option");
   allSources.value = "";
-  allSources.textContent = "All installed sources";
+  allSources.dataset.i18n = "research.source.all";
+  allSources.textContent = localizedText(
+    "research.source.all",
+    "All installed sources",
+  );
   filter.append(allSources);
   body.sources.forEach((source) => {
     if (source.installed) {
@@ -1613,7 +1628,7 @@ async function loadSettings() {
   byId("default-reading-style").value = settings.reading_style;
   byId("answer-language").value = settings.answer_language;
   byId("reading-style").value = settings.reading_style;
-  if (settings.ui_locale !== currentLocale) await applyLocale(settings.ui_locale);
+  await applyLocale(settings.ui_locale);
   const selectedProfiles = [
     profiles.profiles.find((item) => item.id === settings.answer_profile),
     profiles.profiles.find((item) => item.id === settings.embedding_profile),
