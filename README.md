@@ -47,7 +47,9 @@ The project can also be distributed as a drag-to-Applications DMG. The macOS
 application bundles Python and the required dependencies, opens the same interface
 in a native WebKit window, and uses the same workspace as the browser launcher.
 Users do not need Git, Python, uv, or a terminal. Replacing the application with a
-newer release preserves the workspace under Application Support.
+newer release preserves the workspace under Application Support. Supported older
+workspaces get a native backup-and-upgrade confirmation before startup; see
+[upgrades and recovery](docs/Updating.md#desktop-workspace-upgrade).
 
 The DMG is an additional build of this same codebase, not a separate frontend or
 service. See [macOS application distribution](docs/macOS_Application_Distribution.md)
@@ -203,7 +205,12 @@ no network or paid-provider request.
 
 The answer-evaluation estimate is free. A real answer-suite run requires
 `--answers --approve-cost --max-cost-usd N`; its automated checks are only a
-technical screen and the report remains `domain_review_required`.
+technical screen and the report remains `domain_review_required`. Add
+`--report ./answers.json` to deliberately save answers, cited excerpts, and
+provenance. Use `review-answers ./answers.json --template ./review.json` to prepare
+a human review, then `review-answers ./answers.json --review ./review.json --json`
+to assess the completed judgments. See the
+[answer-quality runbook](docs/Answer_Quality_User_Runbook.md).
 
 ## Documentation
 
@@ -217,7 +224,8 @@ technical screen and the report remains `domain_review_required`.
 - [Legacy migration](docs/Migration.md)
 - [Contributing](docs/Contributing.md)
 - [Third-party and source review inventory](docs/Third_Party_and_Source_Review.md)
-- [L1 acceptance evidence](docs/Release_Readiness/2026-09-14_L1_Acceptance.md)
+- [Current beta-batch readiness](docs/Release_Readiness/2026-09-20_Beta_Batch.md)
+- [Historical L1 acceptance evidence](docs/Release_Readiness/2026-09-14_L1_Acceptance.md)
 - [L1 requirement-by-requirement audit](docs/Release_Readiness/2026-09-15_L1_Requirement_Audit.md)
 
 The original hosted PostgreSQL/S3 application remains in the tree as a legacy
@@ -227,8 +235,8 @@ entry path. Its runbooks are marked historical and are not the local quickstart.
 
 The local implementation is a release candidate. macOS arm64 and a built wheel
 have been exercised locally; the repository includes native Linux, macOS, and
-Windows CI, but those remote jobs cannot be claimed until a GitHub remote exists
-and runs them. The five-source installer and bounded HPD connector have been
+Windows CI and a configured GitHub remote. Successful CI evidence must be tied to
+the final release revision; the workflow definition alone is not a passing run. The five-source installer and bounded HPD connector have been
 live-verified; paid-answer, domain-review, parity, and independent clean-machine
 gates are recorded transparently in the acceptance report.
 

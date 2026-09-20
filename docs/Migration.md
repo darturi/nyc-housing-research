@@ -53,7 +53,10 @@ credentials is not part of migration.
 
 ## Upgrading an existing local workspace
 
-Local schema upgrades are separate from hosted-data migration. Check first:
+Local schema upgrades are separate from hosted-data migration. The macOS desktop
+app offers a confirmed backup-and-upgrade flow before startup; see
+[desktop upgrade and recovery](Updating.md#desktop-workspace-upgrade).
+For the CLI, check first:
 
 ```bash
 uv run nyc-housing migrate preflight --json
@@ -65,6 +68,10 @@ When the result reports `migration_available`, stop the browser app and run:
 uv run nyc-housing migrate apply --json
 ```
 
-The supported v1-to-v2 migration creates a timestamped backup under the
-workspace `backups` directory before adding user-resource provenance, locator,
-consent, and operation-receipt fields. Unknown schema versions fail closed.
+Supported `(corpus, state)` pairs `(1,1)`, `(1,2)`, `(2,1)`, `(2,2)`, and `(3,1)`
+upgrade to `(3,2)`. Migration creates and verifies a unique pre-upgrade backup
+under `backups`, adds missing user-resource and saved-research tables/fields,
+and rebuilds the shared full-text index where required. Ordinary migration
+failures restore both previous databases; the backup is retained for recovery.
+Unknown schema versions fail closed. Replacing application code never downgrades
+a workspace, and no schema version should be manually stamped to force startup.

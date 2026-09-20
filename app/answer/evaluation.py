@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from app.answer.local import LocalAnswerService
+from app import __version__
+from app.answer.local import EVIDENCE_MARKER, LocalAnswerEvidence, LocalAnswerService
+from app.corpus.service import CorpusService
 from app.credentials.store import CredentialResolver
 from app.jobs.runtime import Deadline
 from app.providers.gateway import ProviderGateway
@@ -46,6 +50,11 @@ class AnswerEvaluationCase:
     automated_check_passed: bool
     answer: str
     error: str | None
+    cited_citations: tuple[str, ...]
+    cited_source_slugs: tuple[str, ...]
+    evidence: tuple[LocalAnswerEvidence, ...]
+    generation_id: str
+    prompt_version: str
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,15 @@ class AnswerEvaluationReport:
     settled_cost_usd: Decimal
     uncertain_cost_usd: Decimal
     cases: tuple[AnswerEvaluationCase, ...]
+    expected_case_count: int
+    corpus_generation_id: str
+    application_version: str
+    generated_at: str
+    synthetic: bool
+    profile_snapshots: dict[str, dict]
+    output_language: str
+    reading_style: str
+    automated_check_scope: str = "status_and_cited_evidence_only"
 
 
 def estimate_answer_evaluation(
@@ -145,6 +163,9 @@ def run_answer_evaluation(
     )
     payload = load_legal_review_cases(case_file)
     cases = [item for item in payload["cases"] if item["route"] == "legal"]
+    generation_id = CorpusService(storage).status().active_generation_id
+    if not generation_id:
+        raise ValueError("Install a legal corpus before evaluating answers.")
     evaluation_id = str(uuid.uuid4())
     before = budget_before
     gateway = ProviderGateway(
@@ -160,11 +181,17 @@ def run_answer_evaluation(
             CredentialResolver(bounded_context),
         )
         for item in cases:
+            if CorpusService(storage).status().active_generation_id != generation_id:
+                execution_status = "stopped_corpus_changed"
+                break
             result = service.answer(
                 item["question"],
                 deadline=Deadline.after(deadline_per_case_seconds),
                 operation_id=evaluation_id,
             )
+            if result.generation_id != generation_id:
+                execution_status = "stopped_corpus_changed"
+                break
             returned = tuple(
                 evidence.citation or evidence.title or ""
                 for evidence in result.evidence
@@ -172,6 +199,14 @@ def run_answer_evaluation(
             returned_sources = tuple(
                 dict.fromkeys(evidence.source_slug for evidence in result.evidence)
             )
+            markers = {
+                f"E{number}" for number in EVIDENCE_MARKER.findall(result.answer)
+            }
+            cited_evidence = tuple(
+                evidence for evidence in result.evidence if evidence.marker in markers
+            )
+            cited = tuple(e.citation or e.title or "" for e in cited_evidence)
+            cited_sources = tuple(dict.fromkeys(e.source_slug for e in cited_evidence))
             expected = tuple(item.get("relevant_citations", []))
             expected_source = (
                 str(item["required_source"]) if item.get("required_source") else None
@@ -180,10 +215,16 @@ def run_answer_evaluation(
                 str(item["expected_behavior"]),
                 result.status,
                 expected,
-                returned,
+                cited,
                 expected_source,
-                returned_sources,
+                cited_sources,
             )
+            if result.status in {"answered", "synthetic_demo"}:
+                automated_pass = (
+                    automated_pass
+                    and bool(cited_evidence)
+                    and markers <= {evidence.marker for evidence in result.evidence}
+                )
             results.append(
                 AnswerEvaluationCase(
                     case_id=str(item["id"]),
@@ -201,6 +242,11 @@ def run_answer_evaluation(
                     automated_check_passed=automated_pass,
                     answer=result.answer,
                     error=result.error,
+                    cited_citations=cited,
+                    cited_source_slugs=cited_sources,
+                    evidence=result.evidence,
+                    generation_id=result.generation_id,
+                    prompt_version=result.prompt_version,
                 )
             )
             if result.status == "provider_error":
@@ -230,20 +276,47 @@ def run_answer_evaluation(
             Decimal("0"), after.uncertain_usd - before.uncertain_usd
         ),
         cases=tuple(results),
+        expected_case_count=len(cases),
+        corpus_generation_id=generation_id,
+        application_version=__version__,
+        generated_at=datetime.now(UTC).isoformat(),
+        synthetic=answer_profile.provider == "fake"
+        or embedding_profile.provider == "fake"
+        or any(case.answer_status == "synthetic_demo" for case in results),
+        profile_snapshots={
+            "answer": _profile_snapshot(answer_profile),
+            "embedding": _profile_snapshot(embedding_profile),
+        },
+        output_language=context.settings.answer_language,
+        reading_style=context.settings.reading_style,
     )
 
 
 def answer_evaluation_payload(value: object) -> dict:
-    payload = asdict(value)
-    for key in (
-        "conservative_max_cost_usd",
-        "estimated_ceiling_usd",
-        "settled_cost_usd",
-        "uncertain_cost_usd",
-    ):
-        if key in payload:
-            payload[key] = str(payload[key])
+    payload = json.loads(json.dumps(asdict(value), default=str))
+    if isinstance(value, AnswerEvaluationReport):
+        payload.update(format="nyc-housing-answer-evaluation", format_version=1)
     return payload
+
+
+def _profile_snapshot(profile: ProviderProfile) -> dict:
+    return {
+        key: getattr(profile, key)
+        for key in (
+            "id",
+            "version",
+            "provider",
+            "model",
+            "dimension",
+            "input_usd_per_million",
+            "output_usd_per_million",
+            "price_effective_date",
+            "price_source",
+            "max_input_tokens",
+            "max_output_tokens",
+            "token_estimator",
+        )
+    }
 
 
 def _maximum_answer_cost(profile: ProviderProfile) -> Decimal:

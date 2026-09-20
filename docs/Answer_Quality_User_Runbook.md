@@ -16,8 +16,12 @@ uv run nyc-housing evaluate --offline --json
 
 Record the active corpus generation, source versions/hashes, retrieval metrics,
 answer/embedding profile IDs, profile price dates, and application version. The
-55-case retrieval evaluation makes no provider call and does not assess generated
-answer correctness.
+55-case retrieval evaluation makes no provider call and measures exact/keyword
+retrieval, not semantic-model quality or generated answer correctness. The report
+records one retained corpus generation for the entire run. CI runs these same
+questions against an independent, authored miniature corpus through the real
+parser/search path, and checks that removing FTS causes the gate to fail. That
+synthetic regression is not evidence of recall on the full live legal corpus.
 
 ## 2. Inspect one weak question
 
@@ -73,13 +77,36 @@ stops on provider failure, and reports settled/uncertain local cost deltas.
 The 26 legal cases include expected citations or sources, required propositions,
 missing facts for personal scenarios, and conservative unsupported behavior. Two
 property cases remain in the fixture but are reviewed through the separately
-verified property flow. Automated source/citation/status results are a technical
-screen only; the report always says `domain_review_required`.
+verified property flow. Automated status and cited-evidence results are a technical
+screen only; the report always says `domain_review_required`. Expected citations
+must occur in evidence actually referenced by an answer marker, not merely in
+retrieved context. A valid marker still does not establish substantive support.
+The runner stops before further calls when the active corpus changes.
+
+To retain a review artifact explicitly, add `--report ./answers.json` to the
+approved run. The new file contains questions, answers, full evidence excerpts,
+source hashes/versions/dates, corpus generation, prompt versions, application
+version, output language/style, and profile/price snapshots. It is created with
+private POSIX permissions and never overwrites an existing file. The destination
+is reserved before provider work. Without this option, no report file is saved
+by the evaluator; command output may still contain answers.
+
+Create a separate review template without any provider call:
+
+```bash
+uv run nyc-housing review-answers ./answers.json --template ./review.json --json
+```
+
+The template starts every dimension as `pending` and is bound to the evaluation
+ID and canonical report hash. Keep the original report unchanged.
 
 ## 5. Perform proposition-level domain review
 
-For every case, a qualified housing-law reviewer records pass, needs revision, or
-unsupported as expected after checking:
+A qualified housing-law reviewer edits `review.json`, records their name, role,
+and ISO 8601 review timestamp with timezone, and changes each of the four case
+dimensions from `pending` to `pass` or `fail`. Failed dimensions require explanatory
+notes. A correct refusal can pass; do not mark an unsupported answer correct just
+because it declined. Check:
 
 - direct accuracy and whether every material proposition is supported;
 - exceptions, qualifications, source currency, jurisdiction, and missing facts;
@@ -92,6 +119,20 @@ unsupported as expected after checking:
 Prioritize nonpayment notice, complaint follow-up, eCertification, personal heat
 and eviction scenarios, and Good Cause coverage. A passing old-system answer or
 matching citation string is not sufficient evidence.
+
+Validate the completed judgments:
+
+```bash
+uv run nyc-housing review-answers ./answers.json --review ./review.json --json
+```
+
+This performs no network call and does not require an initialized workspace.
+Missing/duplicate cases, a changed report, or incomplete reviewer identity are
+rejected. Pending or failing dimensions prevent acceptance. `accepted: true`
+requires a complete, nonsynthetic run, passing technical checks, and every human
+review dimension passing; exit code 6 denotes unaccepted results. Review identity
+and judgments are self-reported, not independently authenticated or certified.
+The original evaluation report remains unchanged. Keep reports and reviews private.
 
 ## 6. Go/no-go rule
 

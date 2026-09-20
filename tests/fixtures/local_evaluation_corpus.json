@@ -1,0 +1,37 @@
+{
+  "description": "Synthetic research topics for software regression only. These authored miniature documents are not official legal text and must never be distributed as a legal corpus. Evaluation questions and expected citations are stored separately.",
+  "sources": {
+    "nyc-housing-maintenance-code": {
+      "27-2005": {"title": "Duties of owner.", "body": "The owner has responsibility for keeping the premises in good repair, safe and fit for human habitation. Building maintenance and repair obligations apply to multiple dwellings."},
+      "27-2029": {"title": "Minimum temperature to be maintained.", "body": "Apartment heating requirements concern indoor temperature during heat season, October through May. Landlords provide heat subject to daytime, nighttime and outside cold weather conditions."},
+      "27-2031": {"title": "Hot water supply.", "body": "Hot water facilities supply water to bathrooms and kitchens. Water temperature and availability are distinct from space heating."},
+      "27-2047": {"title": "Mail service.", "body": "The owner arranges distribution of mail to occupants of a multiple dwelling."},
+      "27-2009": {"title": "Bedding.", "body": "The maintenance of bedding and linen involves cleanliness and sanitation."},
+      "27-2053": {"title": "Janitorial services.", "body": "A janitor performs cleaning tasks for shared building facilities."}
+    },
+    "ny-multiple-dwelling-law": {
+      "78": {"title": "Repairs.", "body": "Every part of a multiple dwelling must be kept in good repair. The owner has a duty to maintain the building and its facilities; tenant responsibilities are separately qualified."},
+      "80": {"title": "Cleanliness.", "body": "Multiple dwellings and their grounds are maintained in a clean and sanitary condition."},
+      "79": {"title": "Heating.", "body": "Heating facilities in multiple dwellings concern minimum temperatures and building equipment."},
+      "81": {"title": "Receptacles for waste matter.", "body": "Waste receptacles must be maintained and emptied."},
+      "77": {"title": "Plumbing.", "body": "Plumbing fixtures and drainage require appropriate installation."}
+    },
+    "ny-rpapl": {
+      "711": {"title": "Grounds where landlord-tenant relationship exists.", "body": "Summary proceedings include a tenant continuing in possession after a lease term and a tenant defaulting in payment of rent. Nonpayment, written rent demand and holdover grounds have statutory qualifications."},
+      "713": {"title": "Grounds where no landlord-tenant relationship exists.", "body": "Special circumstances allow a proceeding where there is no tenancy relationship."},
+      "721": {"title": "Person who may maintain proceeding.", "body": "Identifies who may bring a summary proceeding."},
+      "753": {"title": "Stay in premises occupied for dwelling purposes.", "body": "A stay of removal concerns possession of dwelling premises."},
+      "1052": {"title": "Fees of surveyor.", "body": "Surveying work may involve fees and necessary expenses."}
+    },
+    "ny-real-property-law-good-cause": {
+      "210": {"title": "Short title.", "body": "Article 6-A is the Good Cause Eviction Law."},
+      "211": {"title": "Definitions.", "body": "Defined terms for Good Cause Eviction include landlord, tenant and housing accommodation. Article 6-A begins with definitions that explain these terms."},
+      "212": {"title": "Local option.", "body": "Local adoption affects application of Article 6-A."},
+      "213": {"title": "Applicability.", "body": "The applicability provision describes the statutory scope."},
+      "214": {"title": "Covered housing accommodations.", "body": "Units covered under Article 6-A are subject to coverage conditions and exemptions."},
+      "215": {"title": "Grounds for removal.", "body": "Removal grounds have statutory limitations."},
+      "216": {"title": "Enforcement.", "body": "Enforcement of the Good Cause Eviction Law concerns judicial remedies."},
+      "231-c": {"title": "Good Cause Eviction Law notice.", "body": "A landlord disclosure informs the tenant about Article 6-A coverage and applicability. The required notice provides notification concerning good cause protections."}
+    }
+  }
+}

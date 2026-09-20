@@ -1,5 +1,9 @@
 # L1 acceptance evidence — 2026-09-14
 
+Historical snapshot. For current schemas, licensing, repository status, upgrade
+behavior, and outstanding gates, see [20 September readiness](2026-09-20_Beta_Batch.md).
+The dated observations below are retained for traceability.
+
 Status: **implementation release candidate; external release gates remain open**.
 
 Comparator revision at start: `7eede2ea` (dirty working tree was preserved).

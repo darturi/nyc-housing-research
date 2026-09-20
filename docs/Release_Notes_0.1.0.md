@@ -1,10 +1,36 @@
 # Release notes: 0.1.0 local-distribution candidate
 
-Date: 2026-09-14
+Updated: 2026-09-20 (unreleased candidate)
 
 This candidate changes the primary product from a maintainer-hosted PostgreSQL/S3
 web service to a clone-and-run local application with optional user-supplied API
 credentials.
+
+## Changes since the initial candidate
+
+- Native desktop confirmation for backup-protected workspace upgrades, automatic
+  database restoration on ordinary migration failure, and a separate recovery-copy
+  offer if automatic recovery fails. The launch lock remains held during shutdown
+  until startup/migration work finishes.
+- The 55-question retrieval regression now uses a frozen synthetic miniature
+  corpus with real parsing, FTS, citations, ranking, and filters. Retrieval reports
+  identify the selected generation and explicitly describe exact/keyword scope.
+- Answer evaluation checks citations actually used in answer prose, records full
+  evidence and corpus/profile/prompt provenance, and stops when the corpus changes.
+  `--report PATH` explicitly saves a private report without overwriting a file.
+- `review-answers` creates pending human-review templates and checks completed
+  reviews against the exact report hash. Accuracy, qualifications/missing facts,
+  citation support, and unsupported claims are reviewed separately. Synthetic,
+  incomplete, or technically failing runs cannot receive answer acceptance.
+- Corpus schema 3 shares full-text rows across generations; state schema 2 adds
+  saved research. HPD connector v3 includes undated rows in unfiltered queries.
+- Personal resources, saved matters, source comparisons, partial rent-regulation
+  packs, property dossiers, and review-labeled English/Spanish/help catalogs are
+  available. Scanned-PDF OCR, additional dossier datasets, and managed offline
+  extensions remain unavailable.
+- Code/documentation licensing is Apache-2.0. A GitHub remote is configured;
+  final-artifact CI, dependency notices, and source redistribution remain separate
+  checks. See [current readiness](Release_Readiness/2026-09-20_Beta_Batch.md).
 
 ## Included
 
@@ -70,16 +96,18 @@ credentials.
 
 ## Deliberate exclusions
 
-No bulk HPD snapshot/citywide analytics, Docker image, saved transcript history,
-fully local model, background OS scheduler, direct legacy-S3 exporter, automatic
-updater, or maintainer-hosted service is included.
+No bulk HPD snapshot/citywide analytics, reviewed managed local model, production
+OCR, background OS scheduler, direct legacy-S3 exporter, automatic updater, or
+maintainer-hosted service is included. Research persists only when explicitly
+saved/exported. The Dockerfile targets the optional legacy hosted app; it is not
+a Docker distribution of the local desktop product.
 
 ## Compatibility
 
 - Application: Python `>=3.12,<3.13`.
-- Local workspace format: 1; corpus schema: 1; state schema: 1.
+- Local workspace format: 1; corpus schema: 3; state schema: 2.
 - Canonical corpus bundle: 1; workspace backup: 1; HPD connector:
-  `hpd-soda21-v2`.
+  `hpd-soda21-v3`.
 - Downgrade across an unsupported schema is refused. Backup into a new destination
   before changing release lines.
 - Legacy vectors without full profile/preprocessing provenance are excluded and
@@ -87,9 +115,10 @@ updater, or maintainer-hosted service is included.
 
 ## Release blockers
 
-This is not yet publishable as a completed open-source L1 release: a code license,
-verified GitHub remote/CI runs, bounded paid answer evaluation, legal-domain
-review, controlled PostgreSQL parity comparison, and an independent clean-machine
-journey remain external release evidence. Source redistribution also remains
+Final-artifact platform CI, bounded real-provider answer evaluation, legal-domain
+review, controlled PostgreSQL retrieval parity, an independent clean-machine
+journey, and a signed/notarized public desktop build still require release
+evidence. The code license and repository remote are already present. Dependency
+license/notices review remains separate from the code license. Source redistribution also remains
 unapproved, so official source downloads—not a bundled corpus—are the default.
 See the L1 acceptance report and the requirement-by-requirement audit.

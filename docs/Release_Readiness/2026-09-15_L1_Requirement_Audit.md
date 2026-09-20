@@ -1,5 +1,9 @@
 # L1 requirement audit — 2026-09-15
 
+Historical snapshot. For current schemas, licensing, repository status, upgrade
+behavior, and outstanding gates, see [20 September readiness](2026-09-20_Beta_Batch.md).
+The dated observations below are retained for traceability.
+
 Status: **implementation-complete candidate with explicit external gates**.
 
 This audit traces the L1 feature specification and implementation work packages

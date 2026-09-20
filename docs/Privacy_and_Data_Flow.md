@@ -86,6 +86,14 @@ contain the question/evidence or property rows the user selected. Workspace
 backups include user-provided resources so restore is complete. Portable corpus
 bundles contain official core sources only and exclude user resources.
 
+Answer evaluation persists a report only when `--report PATH` is explicitly
+supplied (shell redirection can also persist command output). These reports
+contain questions, answers, evidence excerpts, source provenance, and profile
+metadata. Human-review files contain reviewer identity, judgments, and notes;
+they are bound to the report hash and never uploaded by `review-answers`.
+Report files use private POSIX permissions and must not be treated as redacted
+diagnostics or added to a public release. Backups exclude unrelated reports.
+
 ## Offline mode
 
 `--offline` is enforced by the shared network policy for source downloads, HPD,

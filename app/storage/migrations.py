@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import tempfile
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import text
 
-from app.maintenance.backup import WorkspaceBackupService
+from app.maintenance.backup import WorkspaceBackupService, _read_backup, _sqlite_backup
 from app.maintenance.barrier import MaintenanceBarrier
 from app.storage.database import (
     LocalStorage,
@@ -31,6 +34,18 @@ class MigrationResult:
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+class MigrationFailure(SchemaVersionError):
+    def __init__(self, message: str, backup_path: Path, *, recovered: bool) -> None:
+        self.backup_path = backup_path
+        self.recovered = recovered
+        recovery = (
+            "The previous workspace databases were restored."
+            if recovered
+            else "Automatic recovery failed. Restore the backup to a new folder."
+        )
+        super().__init__(f"Upgrade failed: {message} {recovery} Backup: {backup_path}")
 
 
 def migration_preflight(context: WorkspaceContext) -> dict[str, object]:
@@ -84,10 +99,14 @@ def migrate_workspace(context: WorkspaceContext) -> MigrationResult:
     from app.launcher import workspace_launch_lock
 
     with workspace_launch_lock(context.paths.root):
-        return _migrate_workspace_locked(context)
+        return migrate_workspace_locked(context)
 
 
-def _migrate_workspace_locked(context: WorkspaceContext) -> MigrationResult:
+def migrate_workspace_locked(context: WorkspaceContext) -> MigrationResult:
+    """Upgrade while the caller holds the launch lock for the entire operation.
+
+    The desktop launcher already owns that lock; CLI callers use migrate_workspace.
+    """
     if not context.initialized:
         raise SchemaVersionError("Workspace is not initialized; run setup first.")
     storage = LocalStorage.open(context.paths)
@@ -112,22 +131,65 @@ def _migrate_workspace_locked(context: WorkspaceContext) -> MigrationResult:
         from_corpus = int(versions["corpus"])
         from_state = int(versions["state"])
         backup_path = context.paths.backups / (
-            f"pre-migration-c{from_corpus}-s{from_state}-{timestamp}.zip"
+            f"pre-migration-c{from_corpus}-s{from_state}-{timestamp}-"
+            f"{uuid.uuid4().hex[:8]}.zip"
         )
         WorkspaceBackupService(storage).create(backup_path)
+        _read_backup(backup_path)  # Verify the final archive before touching schemas.
         barrier = MaintenanceBarrier(storage.state_engine)
         barrier.enter("migration", datetime.now(UTC))
+        failure = None
         try:
-            if from_corpus == 1:
-                _migrate_corpus_v1_to_v2(storage)
-            if from_corpus <= 2:
-                _migrate_corpus_v2_to_v3(storage)
-            if from_state == 1:
-                _migrate_state_v1_to_v2(storage)
-            _write_workspace_manifest(context.paths)
-            storage.assert_compatible()
+            # SQLite DDL and two separate stores cannot share one transaction.
+            # Keep exact local snapshots under both locks so an ordinary failure
+            # can undo a partially applied migration, including WAL changes.
+            with tempfile.TemporaryDirectory(
+                prefix=".migration-", dir=context.paths.root
+            ) as temporary:
+                corpus_copy = Path(temporary) / "corpus.sqlite3"
+                state_copy = Path(temporary) / "state.sqlite3"
+                _sqlite_backup(context.paths.corpus_database, corpus_copy)
+                _sqlite_backup(context.paths.state_database, state_copy)
+                try:
+                    if from_corpus == 1:
+                        _migrate_corpus_v1_to_v2(storage)
+                    if from_corpus <= 2:
+                        _migrate_corpus_v2_to_v3(storage)
+                    if from_state == 1:
+                        _migrate_state_v1_to_v2(storage)
+                    _write_workspace_manifest(context.paths)
+                    storage.assert_compatible()
+                except Exception as exc:
+                    storage.close()
+                    try:
+                        _sqlite_backup(corpus_copy, context.paths.corpus_database)
+                        _sqlite_backup(state_copy, context.paths.state_database)
+                        _write_workspace_manifest(context.paths, versions=versions)
+                    except Exception as recovery_error:
+                        raise MigrationFailure(
+                            f"{exc}; recovery error: {recovery_error}",
+                            backup_path,
+                            recovered=False,
+                        ) from exc
+                    raise MigrationFailure(
+                        str(exc), backup_path, recovered=True
+                    ) from exc
+        except Exception as exc:
+            failure = exc
+            raise
         finally:
-            barrier.leave()
+            try:
+                barrier.leave()
+            except Exception as cleanup_error:
+                # Preserve the backup/recovery details if cleanup also fails.
+                # The OS lease is released by leave() even when its SQL fails.
+                if failure is None:
+                    raise MigrationFailure(
+                        f"Could not finish maintenance: {cleanup_error}",
+                        backup_path,
+                        recovered=False,
+                    ) from cleanup_error
+                failure.add_note(f"Maintenance cleanup also failed: {cleanup_error}")
         return MigrationResult(
             status="migrated",
             from_corpus_version=from_corpus,

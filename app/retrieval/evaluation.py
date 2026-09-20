@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -28,6 +29,8 @@ class RetrievalEvaluation:
     minimum_mrr: float
     failures: tuple[str, ...]
     cases: tuple[RetrievalCaseResult, ...]
+    corpus_generation_id: str
+    evaluation_scope: str = "local_exact_and_keyword"
 
 
 def load_retrieval_cases(path: Path | None = None) -> list[dict]:
@@ -64,12 +67,25 @@ def evaluate_retrieval(
 ) -> RetrievalEvaluation:
     if not 1 <= k <= 20:
         raise ValueError("Evaluation k must be between 1 and 20.")
+    if not cases:
+        raise ValueError("Evaluation requires at least one case.")
+    if any(
+        not math.isfinite(value) or not 0 <= value <= 1
+        for value in (minimum_recall, minimum_mrr)
+    ):
+        raise ValueError("Evaluation thresholds must be finite and between 0 and 1.")
+    if len({case["id"] for case in cases}) != len(cases):
+        raise ValueError("Evaluation case IDs must be unique.")
     results = []
     failures = []
+    generation_id = None
     for item in cases:
         expected = tuple(item["expected_citations"])
         filters = LocalSearchFilters(**item.get("filters", {}))
-        response = search.search(item["query"], filters=filters, limit=k)
+        response = search.search(
+            item["query"], filters=filters, limit=k, generation_id=generation_id
+        )
+        generation_id = response.generation_id
         returned = tuple(result.citation or "" for result in response.results)
         if item.get("expected_empty") is True:
             rank = 1 if not returned else None
@@ -118,4 +134,5 @@ def evaluate_retrieval(
         minimum_mrr=minimum_mrr,
         failures=tuple(failures),
         cases=tuple(results),
+        corpus_generation_id=generation_id,
     )

@@ -26,8 +26,10 @@ unfinished free source installation. Read the stage label above any error.
 - **Offline dependencies are missing:** first use requires internet; rerun without
   `--offline`. Offline cannot install uncached runtimes, dependencies or sources.
 - **Incompatible/incomplete workspace:** keep it intact. Use its matching app
-  version or restore a verified backup into a new workspace. The launcher will
-  not stamp schema versions, overwrite databases, or silently migrate them.
+  version or restore a verified backup into a new workspace. The desktop app
+  offers a confirmed backup-and-upgrade flow for supported older schemas. CLI
+  users can run `migrate preflight` and, when available, `migrate apply`.
+  Unknown/newer schemas are never silently migrated. See [Updating](Updating.md).
 
 For deeper diagnostics in an existing uv environment, start with:
 

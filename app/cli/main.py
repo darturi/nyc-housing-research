@@ -20,6 +20,13 @@ from app.answer.evaluation import (
     run_answer_evaluation,
 )
 from app.answer.local import LocalAnswerService
+from app.answer.review import (
+    assess_review,
+    create_review_template,
+    private_json_output,
+    read_evaluation_report,
+    read_json,
+)
 from app.corpus.bundle import CanonicalBundleService
 from app.corpus.download import SourceDownloadError
 from app.corpus.packs import SourcePackService
@@ -687,7 +694,22 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--approve-cost", action="store_true")
     evaluate.add_argument("--max-cost-usd", type=Decimal)
     evaluate.add_argument("--legal-case-file")
+    evaluate.add_argument(
+        "--report",
+        type=Path,
+        help="Explicitly save answers and evidence to a new private JSON report.",
+    )
     evaluate.add_argument("--json", action="store_true")
+
+    review = commands.add_parser(
+        "review-answers",
+        help="Prepare or assess human review of a saved answer report.",
+    )
+    review.add_argument("report", type=Path)
+    review_action = review.add_mutually_exclusive_group(required=True)
+    review_action.add_argument("--template", type=Path)
+    review_action.add_argument("--review", type=Path)
+    review.add_argument("--json", action="store_true")
 
     benchmark = commands.add_parser(
         "benchmark", help="Run the synthetic local retrieval performance gate."
@@ -784,6 +806,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _legacy(args)
         if args.command in {"evaluate", "evaluate-retrieval"}:
             return _evaluate_retrieval(context, args)
+        if args.command == "review-answers":
+            report = read_evaluation_report(args.report)
+            if args.template:
+                with private_json_output(args.template) as write:
+                    write(create_review_template(report))
+                _write(
+                    {
+                        "template": str(args.template),
+                        "review_status": "domain_review_required",
+                    },
+                    as_json=args.json,
+                )
+                return 0
+            result = assess_review(report, read_json(args.review))
+            _write(result, as_json=args.json)
+            return 0 if result["accepted"] else EXIT_VALIDATION_FAILED
         if args.command == "benchmark":
             return _benchmark(args)
         if args.command == "update-check":
@@ -2279,6 +2317,12 @@ def _migration_apply(context: WorkspaceContext, args: argparse.Namespace) -> int
 
 
 def _evaluate_retrieval(context: WorkspaceContext, args: argparse.Namespace) -> int:
+    if getattr(args, "report", None) and (
+        not getattr(args, "answers", False) or args.estimate_only
+    ):
+        raise ValueError(
+            "--report requires an answer run, not a retrieval run or estimate."
+        )
     storage = _initialized_storage(context)
     try:
         if getattr(args, "answers", False):
@@ -2290,14 +2334,17 @@ def _evaluate_retrieval(context: WorkspaceContext, args: argparse.Namespace) -> 
                 )
                 _write(answer_evaluation_payload(estimate), as_json=args.json)
                 return 0
-            report = run_answer_evaluation(
-                context,
-                storage,
-                approve_cost=args.approve_cost,
-                max_cost_usd=args.max_cost_usd,
-                case_file=case_file,
-            )
-            _write(answer_evaluation_payload(report), as_json=args.json)
+            with private_json_output(args.report) as write:
+                report = run_answer_evaluation(
+                    context,
+                    storage,
+                    approve_cost=args.approve_cost,
+                    max_cost_usd=args.max_cost_usd,
+                    case_file=case_file,
+                )
+                payload = answer_evaluation_payload(report)
+                write(payload)
+            _write(payload, as_json=args.json)
             return 0 if report.automated_checks_passed else EXIT_VALIDATION_FAILED
         if getattr(args, "estimate_only", False):
             raise ValueError("--estimate-only requires --answers.")

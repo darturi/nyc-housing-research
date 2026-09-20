@@ -5,16 +5,41 @@ not automatically download legal sources or buy new embeddings.
 
 ## Check for a release
 
-There is no verified repository remote in this checkout yet, so no URL is baked
-into the application. After the maintainer establishes the public repository:
+The configured repository remote is `https://github.com/darturi/NYC_Housing_Rag`.
+Select it explicitly for a metadata-only release check:
 
 ```bash
 uv run nyc-housing update-check \
-  --repository https://github.com/OWNER/REPOSITORY --json
+  --repository https://github.com/darturi/NYC_Housing_Rag --json
 ```
 
 This reads GitHub release metadata only. It never downloads or executes release
 code and never changes the checkout.
+
+## Desktop workspace upgrade
+
+Replace the application with a compatible release and launch it. When a supported
+older workspace is detected, the app explains the upgrade and asks for native
+confirmation. Cancel leaves the schema unchanged. Confirm creates and verifies a
+unique pre-migration ZIP under the workspace's `backups` folder before upgrading.
+No provider calls or source downloads are part of the migration.
+
+Keep the application open until the upgrade finishes. It holds the launch lock
+through migration and shutdown, so closing the window does not release ownership
+while the databases are being changed. The current pair is corpus **3**, state
+**2**; unknown or newer schemas remain blocked.
+
+An ordinary migration error restores exact local snapshots of both pre-upgrade
+databases and reports the durable backup path. Fix the reported problem before
+reopening to retry. If automatic recovery also fails, the app offers to restore
+the verified backup to a separate sibling folder named `…-recovered-…`, preserving
+the original workspace. That copy still has the pre-upgrade schema and needs
+compatible code or a successful migration. It is not automatically selected as
+the application's default workspace. Secrets are excluded from durable backups.
+
+A process kill or power loss cannot run automatic error recovery. Keep the
+pre-migration backup and use the restore procedure if an interrupted upgrade
+cannot be resumed by the available migration path.
 
 ## Safe tagged-release workflow
 

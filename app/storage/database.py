@@ -211,11 +211,17 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
     return row is not None
 
 
-def _write_workspace_manifest(paths: WorkspacePaths) -> None:
+def _write_workspace_manifest(
+    paths: WorkspacePaths, *, versions: dict[str, int] | None = None
+) -> None:
+    versions = versions or {
+        "corpus": CORPUS_SCHEMA_VERSION,
+        "state": STATE_SCHEMA_VERSION,
+    }
     payload = {
         "format_version": 1,
-        "corpus_schema_version": CORPUS_SCHEMA_VERSION,
-        "state_schema_version": STATE_SCHEMA_VERSION,
+        "corpus_schema_version": versions["corpus"],
+        "state_schema_version": versions["state"],
     }
     descriptor, temporary_name = tempfile.mkstemp(
         dir=paths.root,

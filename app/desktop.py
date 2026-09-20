@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import sys
 import threading
+import uuid
 from typing import Any
 
 from app.launcher import (
@@ -13,7 +14,13 @@ from app.launcher import (
     prepare_workspace,
     workspace_launch_lock,
 )
-from app.storage.database import LocalStorage
+from app.maintenance.backup import restore_backup
+from app.storage.database import LocalStorage, SchemaVersionError
+from app.storage.migrations import (
+    MigrationFailure,
+    migrate_workspace_locked,
+    migration_preflight,
+)
 from app.workspace.context import WorkspaceContext
 
 
@@ -79,7 +86,8 @@ class DesktopApplication:
             self.cancelled.set()
             self._stop_runtime()
             if self.bootstrap_started.is_set():
-                self.bootstrap_done.wait(35)
+                # Never release workspace ownership while migration is running.
+                self.bootstrap_done.wait()
             launch_lock.__exit__(None, None, None)
         return 3 if self.failed else 0
 
@@ -94,7 +102,12 @@ class DesktopApplication:
         storage = None
         try:
             self._show_status("Preparing your workspace…")
-            storage = prepare_workspace(self.context)
+            try:
+                storage = prepare_workspace(self.context)
+            except SchemaVersionError:
+                if not self._offer_upgrade(window):
+                    return
+                storage = prepare_workspace(self.context)
             storage.close()
             storage = None
             if self.cancelled.is_set():
@@ -136,6 +149,68 @@ class DesktopApplication:
             if storage is not None:
                 storage.close()
             self.bootstrap_done.set()
+
+    def _offer_upgrade(self, window) -> bool:
+        preflight = migration_preflight(self.context)
+        if not preflight["migration_available"]:
+            raise SchemaVersionError(
+                "This workspace needs a different application version. "
+                "No supported upgrade is available. Keep your workspace and open "
+                "it with a compatible release; its databases have not been replaced."
+            )
+        message = (
+            "This workspace needs an upgrade before it can open. The app will "
+            "first create a backup, then update your local databases. Your saved "
+            "research and sources will be preserved. No downloads or model calls "
+            "are required. Keep the app open until it finishes.\n\n"
+            f"Workspace: {self.context.paths.root}\n"
+            f"Backup folder: {self.context.paths.backups}\n\n"
+            "Choose OK to back up and upgrade, or Cancel to leave it unchanged."
+        )
+        self._show_status(message)
+        if self.cancelled.is_set() or not window.create_confirmation_dialog(
+            "Back up and upgrade workspace?", message
+        ):
+            self._show_status(
+                "Upgrade cancelled. Your workspace is unchanged. Close this "
+                "window and reopen the app when you are ready to upgrade."
+            )
+            return False
+        if self.cancelled.is_set():
+            return False
+        self._show_status("Backing up and upgrading your workspace…")
+        try:
+            result = migrate_workspace_locked(self.context)
+        except MigrationFailure as exc:
+            self.failed = True
+            window.load_html(
+                _error_page("Workspace upgrade could not finish", str(exc))
+            )
+            # Ordinary failures already restore the exact pre-upgrade databases.
+            # If that also fails, offer a verified, non-destructive recovery copy.
+            if not exc.recovered and not self.cancelled.is_set():
+                destination = self.context.paths.root.with_name(
+                    f"{self.context.paths.root.name}-recovered-{uuid.uuid4().hex[:8]}"
+                )
+                if window.create_confirmation_dialog(
+                    "Restore a recovery copy?",
+                    "Restore the verified pre-upgrade backup to a separate folder? "
+                    "The current workspace will be kept. The copy needs a release "
+                    "compatible with its old format, or a successful upgrade.\n\n"
+                    f"Recovery folder: {destination}",
+                ):
+                    restore_backup(exc.backup_path, destination)
+                    window.load_html(
+                        _error_page(
+                            "Recovery copy restored",
+                            f"Your pre-upgrade data is in {destination}. "
+                            "The original workspace and backup are preserved. "
+                            "Close this window before opening a compatible release.",
+                        )
+                    )
+            return False
+        self._show_status(f"Workspace upgraded. Backup saved at {result.backup_path}")
+        return True
 
     def _show_status(self, message: str) -> None:
         print(message, flush=True)

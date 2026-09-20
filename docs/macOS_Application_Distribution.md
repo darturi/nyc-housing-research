@@ -79,8 +79,12 @@ new DMG and replaces the application in Applications. Their workspace remains in
 Application Support and is shared with the repository/browser launch mode.
 
 Every release must remain compatible with its declared workspace schema or include
-a tested, backup-gated migration. Installing a new application does not rewrite or
-discard an incompatible workspace. Corpus/source updates remain independent of
+a tested, backup-gated migration. On launch, this candidate offers a native
+backup-and-upgrade confirmation for supported older schemas. Cancelling preserves
+the workspace; ordinary migration failures restore the previous databases.
+Unknown/newer schemas remain blocked. See [Updating](Updating.md) for recovery
+behavior and the separate-copy fallback. Test accept, cancel, failed backup,
+failed migration, and Quit during migration when verifying a desktop build. Corpus/source updates remain independent of
 application updates and continue to use the Sources view.
 
 ## Shared implementation boundary
