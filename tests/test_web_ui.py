@@ -29,6 +29,7 @@ def test_login_page_renders_form_and_assets():
 
     assert response.status_code == 200
     assert '<form id="login-form"' in response.text
+    assert 'rel="icon" href="/static/favicon.svg"' in response.text
     assert 'href="/static/web.css"' in response.text
     assert 'src="/static/web.js"' in response.text
 
@@ -53,6 +54,7 @@ def test_authenticated_app_renders_workspace_shell():
     assert "admin@example.com" in response.text
     assert '<form id="query-form"' in response.text
     assert 'id="result-region"' in response.text
+    assert 'rel="icon" href="/static/favicon.svg"' in response.text
 
 
 def test_static_web_assets_are_served():
@@ -60,11 +62,14 @@ def test_static_web_assets_are_served():
 
     css_response = client.get("/static/web.css")
     js_response = client.get("/static/web.js")
+    icon_response = client.get("/static/favicon.svg")
 
     assert css_response.status_code == 200
     assert "text/css" in css_response.headers["content-type"]
     assert js_response.status_code == 200
     assert "javascript" in js_response.headers["content-type"]
+    assert icon_response.status_code == 200
+    assert "image/svg+xml" in icon_response.headers["content-type"]
 
 
 def authenticated_client() -> TestClient:

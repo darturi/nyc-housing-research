@@ -50,6 +50,20 @@ def test_feature_spec_local_session_alias_is_one_use(tmp_path, capsys) -> None:
     assert client.get("/api/v1/status").json()["mode"] == "local"
 
 
+def test_local_page_links_browser_icon(tmp_path, capsys) -> None:
+    app = _app(tmp_path)
+    capsys.readouterr()
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    page = client.get("/")
+    icon = client.get("/static/favicon.svg")
+
+    assert page.status_code == 200
+    assert 'rel="icon" href="/static/favicon.svg"' in page.text
+    assert icon.status_code == 200
+    assert "image/svg+xml" in icon.headers["content-type"]
+
+
 def test_host_origin_and_csrf_are_enforced_before_routing(tmp_path, capsys) -> None:
     app = _app(tmp_path)
     capsys.readouterr()
