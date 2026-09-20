@@ -33,7 +33,7 @@ def test_setup_and_status_are_idempotent_and_do_not_run_paid_work(
     assert first["status"] == "initialized"
     assert first["application_version"].startswith("0.1.0")
     assert "No paid request" in first["message"]
-    assert first["schema_versions"] == {"corpus": 2, "state": 2}
+    assert first["schema_versions"] == {"corpus": 3, "state": 2}
     assert (root / "corpus.sqlite3").is_file()
     assert (root / "state.sqlite3").is_file()
 
@@ -144,6 +144,28 @@ def test_supported_v1_migration_creates_backup_and_adds_resource_columns(
             """
         )
 
+    # Complete the v1 fixture's unchanged tables and derived index. The legacy
+    # columns above deliberately remain at v1 for the actual migration.
+    from sqlalchemy import create_engine
+
+    from app.storage.schema import corpus_metadata
+
+    legacy_engine = create_engine(f"sqlite+pysqlite:///{corpus_path}")
+    corpus_metadata.create_all(
+        legacy_engine,
+        tables=[
+            table
+            for table in corpus_metadata.sorted_tables
+            if table.name != "corpus_operations"
+        ],
+    )
+    with legacy_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE VIRTUAL TABLE chunk_fts USING fts5("
+            "chunk_id UNINDEXED, generation_id UNINDEXED, title, citation, body)"
+        )
+    legacy_engine.dispose()
+
     assert (
         main(["--data-dir", str(root), "migrate", "preflight", "--json"])
         == EXIT_INVALID_CONFIGURATION
@@ -155,7 +177,7 @@ def test_supported_v1_migration_creates_backup_and_adds_resource_columns(
     assert main(["--data-dir", str(root), "migrate", "apply", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "migrated"
-    assert result["to_corpus_version"] == 2
+    assert result["to_corpus_version"] == 3
     assert (root / "backups" / result["backup_path"].split("/")[-1]).is_file()
     with sqlite3.connect(corpus_path) as connection:
         module_columns = {

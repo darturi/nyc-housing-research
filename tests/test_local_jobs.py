@@ -150,6 +150,10 @@ def test_maintenance_barrier_blocks_claim_and_resume(tmp_path) -> None:
     paths = resolve_workspace_paths(data_dir=tmp_path / "workspace", environment={})
     storage = LocalStorage.open(paths, initialize=True)
     service = JobService(storage.state_engine)
+    from app.workspace.locks import FileLease
+
+    lease = FileLease(paths.root / ".maintenance.lock")
+    lease.acquire()
     queued = service.create("answer", "queued")
     paused = service.create("corpus_update", "paused")
     with storage.state_engine.begin() as connection:
@@ -169,4 +173,5 @@ def test_maintenance_barrier_blocks_claim_and_resume(tmp_path) -> None:
         with pytest.raises(JobConflict, match="maintenance"):
             service.resume(paused.id)
     finally:
+        lease.release()
         storage.close()

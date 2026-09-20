@@ -7,19 +7,21 @@ import shutil
 import sqlite3
 import stat
 import tempfile
+import uuid
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
+from app.maintenance.barrier import MaintenanceBarrier
 from app.storage.database import LocalStorage
 from app.storage.schema import (
     CORPUS_SCHEMA_VERSION,
     STATE_SCHEMA_VERSION,
     jobs,
-    maintenance_state,
     property_cache,
     source_versions,
 )
@@ -46,6 +48,7 @@ class BackupSummary:
 class WorkspaceBackupService:
     def __init__(self, storage: LocalStorage) -> None:
         self._storage = storage
+        self._barrier = MaintenanceBarrier(storage.state_engine)
 
     def create(
         self, destination: Path, *, include_property_cache: bool = False
@@ -54,8 +57,9 @@ class WorkspaceBackupService:
         destination.parent.mkdir(parents=True, exist_ok=True)
         created_at = datetime.now(UTC)
         self._enter_barrier(created_at)
-        temporary_root = Path(tempfile.mkdtemp(prefix="nyc-housing-backup-"))
+        temporary_root = None
         try:
+            temporary_root = Path(tempfile.mkdtemp(prefix="nyc-housing-backup-"))
             corpus_copy = temporary_root / "corpus.sqlite3"
             state_copy = temporary_root / "state.sqlite3"
             _sqlite_backup(self._storage.paths.corpus_database, corpus_copy)
@@ -93,51 +97,43 @@ class WorkspaceBackupService:
                 includes_property_cache=include_property_cache,
             )
         finally:
-            shutil.rmtree(temporary_root, ignore_errors=True)
+            if temporary_root is not None:
+                shutil.rmtree(temporary_root, ignore_errors=True)
             self._leave_barrier()
 
     def _enter_barrier(self, now: datetime) -> None:
-        connection = self._storage.state_engine.connect()
         try:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
-            barrier = connection.scalar(
-                select(maintenance_state.c.active).where(maintenance_state.c.id == 1)
-            )
-            if barrier:
-                raise BackupError("Another workspace maintenance operation is active.")
-            active_job = connection.scalar(
-                select(jobs.c.id).where(
-                    jobs.c.state.in_(["queued", "running", "cancel_requested"])
-                )
-            )
-            if active_job:
-                raise BackupError(
-                    "Pause or finish active jobs before creating a workspace backup."
-                )
-            connection.execute(
-                update(maintenance_state)
-                .where(maintenance_state.c.id == 1)
-                .values(active=True, operation="backup", started_at=now)
-            )
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+            self._barrier.enter("backup", now)
+        except RuntimeError as exc:
+            raise BackupError(str(exc)) from exc
 
     def _leave_barrier(self) -> None:
-        with self._storage.state_engine.begin() as connection:
-            connection.execute(
-                update(maintenance_state)
-                .where(maintenance_state.c.id == 1)
-                .values(active=False, operation=None, started_at=None)
-            )
+        self._barrier.leave()
 
     def _artifact_paths(self, include_property_cache: bool) -> list[Path]:
         relatives = []
         with self._storage.corpus_engine.connect() as connection:
             relatives.extend(connection.scalars(select(source_versions.c.artifact_uri)))
+        with self._storage.state_engine.connect() as connection:
+            pending = connection.execute(
+                select(jobs.c.resume_json).where(
+                    jobs.c.job_type.in_(["resource_add", "resource_replace"]),
+                    jobs.c.state.in_(["paused", "failed"]),
+                    jobs.c.retryable.is_(True),
+                )
+            ).scalars()
+            for raw in pending:
+                stage_id = str(uuid.UUID(json.loads(raw)["stage_id"]))
+                relatives.extend(
+                    str(
+                        (
+                            self._storage.paths.artifacts
+                            / "resource-staging"
+                            / f"{stage_id}{suffix}"
+                        ).relative_to(self._storage.paths.root)
+                    )
+                    for suffix in (".bin", ".json")
+                )
         if include_property_cache:
             with self._storage.state_engine.connect() as connection:
                 relatives.extend(
@@ -197,6 +193,8 @@ def restore_backup(archive: Path, destination: Path) -> BackupSummary:
                 {"corpus": 1, "state": 1},
                 {"corpus": 1, "state": 2},
                 {"corpus": 2, "state": 1},
+                {"corpus": 2, "state": 2},
+                {"corpus": 3, "state": 1},
             ):
                 raise BackupError("Backup schema versions are incompatible.")
         finally:
@@ -223,7 +221,7 @@ def restore_backup(archive: Path, destination: Path) -> BackupSummary:
 
 
 def _sanitize_state_copy(path: Path, include_property_cache: bool) -> None:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         for table in (
             "local_sessions",
             "launcher_tokens",
@@ -237,7 +235,10 @@ def _sanitize_state_copy(path: Path, include_property_cache: bool) -> None:
         )
         if not include_property_cache:
             connection.execute("DELETE FROM property_cache")
-    with sqlite3.connect(path) as connection:
+        connection.commit()
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("PRAGMA journal_mode=DELETE")
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute("VACUUM")
 
 
@@ -257,10 +258,11 @@ def _sanitized_settings(storage: LocalStorage) -> bytes:
 
 def _sqlite_backup(source: Path, destination: Path) -> None:
     with (
-        sqlite3.connect(source) as source_connection,
-        sqlite3.connect(destination) as destination_connection,
+        closing(sqlite3.connect(source)) as source_connection,
+        closing(sqlite3.connect(destination)) as destination_connection,
     ):
         source_connection.backup(destination_connection)
+        destination_connection.execute("PRAGMA journal_mode=DELETE")
 
 
 def _read_backup(path: Path):

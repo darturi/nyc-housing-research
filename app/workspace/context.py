@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.workspace.network import NetworkPolicy
@@ -18,8 +18,12 @@ from app.workspace.settings import (
 class WorkspaceContext:
     paths: WorkspacePaths
     settings: LocalSettings
-    network: NetworkPolicy
+    network: NetworkPolicy | LiveNetworkPolicy
     detected_legacy_environment: tuple[str, ...] = ()
+    policy: WorkspacePolicy | None = field(default=None, compare=False, repr=False)
+
+    def current(self) -> WorkspaceContext:
+        return self.policy.context if self.policy is not None else self
 
     @classmethod
     def from_options(
@@ -63,3 +67,41 @@ def network_policy_for_settings(settings: LocalSettings) -> NetworkPolicy:
         allow_loopback_services=enabled,
         allowed_loopback_urls=(str(endpoint),) if enabled else (),
     )
+
+
+class WorkspacePolicy:
+    """Publish an immutable policy snapshot shared by API and background work."""
+
+    def __init__(self, context: WorkspaceContext) -> None:
+        self.context = context
+
+    def update(self, context: WorkspaceContext) -> None:
+        self.context = context
+
+
+class LiveNetworkPolicy:
+    """Already-created connectors must honor a subsequent offline switch."""
+
+    def __init__(self, policy: WorkspacePolicy) -> None:
+        self.policy = policy
+
+    @property
+    def offline(self) -> bool:
+        return self.policy.context.settings.offline
+
+    @property
+    def allow_loopback_services(self) -> bool:
+        return network_policy_for_settings(
+            self.policy.context.settings
+        ).allow_loopback_services
+
+    @property
+    def allowed_loopback_urls(self) -> tuple[str, ...]:
+        return network_policy_for_settings(
+            self.policy.context.settings
+        ).allowed_loopback_urls
+
+    def assert_url_allowed(self, url: str, *, purpose: str) -> None:
+        network_policy_for_settings(self.policy.context.settings).assert_url_allowed(
+            url, purpose=purpose
+        )

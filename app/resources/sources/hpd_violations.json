@@ -7,7 +7,7 @@
   "dataset_url": "https://data.cityofnewyork.us/Housing-Development/Housing-Maintenance-Code-Violations/wvxf-dwi5",
   "endpoint": "https://data.cityofnewyork.us/resource/wvxf-dwi5.json",
   "api_dialect": "SODA 2.1",
-  "connector_version": "hpd-soda21-v2",
+  "connector_version": "hpd-soda21-v3",
   "verified_at": "2026-09-14",
   "row_identifier": "violationid",
   "status_mapping": {

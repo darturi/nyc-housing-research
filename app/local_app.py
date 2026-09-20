@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData, UploadFile
 
 from app import __version__
@@ -79,7 +80,7 @@ from app.security.local_session import (
 from app.storage.database import LocalStorage
 from app.storage.schema import maintenance_state
 from app.usage.ledger import PaidCapacityUnavailable, SpendDenied, UsageLedger
-from app.workspace.context import WorkspaceContext, network_policy_for_settings
+from app.workspace.context import WorkspaceContext
 from app.workspace.network import NetworkAccessDenied
 from app.workspace.settings import LocalSettingsError, save_local_settings
 
@@ -104,6 +105,11 @@ def create_local_app(
 ) -> FastAPI:
     if not context.initialized:
         raise ValueError("The local browser app requires an initialized workspace.")
+    from app.workspace.context import LiveNetworkPolicy, WorkspacePolicy
+
+    policy = WorkspacePolicy(context)
+    context = replace(context, policy=policy, network=LiveNetworkPolicy(policy))
+    policy.update(context)
     storage = LocalStorage.open(context.paths)
     storage.assert_compatible()
     sessions = LocalSessionService(storage)
@@ -605,15 +611,16 @@ def create_local_app(
             context = replace(
                 context,
                 settings=candidate,
-                network=network_policy_for_settings(candidate),
+                network=LiveNetworkPolicy(policy),
             )
             app.state.workspace = context
+            policy.update(context)
         except (TypeError, LocalSettingsError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(
             {
                 "settings": context.settings.public_dict(),
-                "restart_required_for_active_jobs": True,
+                "restart_required_for_active_jobs": False,
             }
         )
 
@@ -706,7 +713,8 @@ def create_local_app(
                 )
             raw_ceiling = payload.get("max_cost_usd")
             ceiling = Decimal(str(raw_ceiling)) if raw_ceiling is not None else None
-            result = run_credential_validation(
+            result = await run_in_threadpool(
+                run_credential_validation,
                 context,
                 storage,
                 provider,
@@ -1289,8 +1297,11 @@ def create_local_app(
                 property_connector_factory,
             )
             try:
-                result = repository.search(
-                    query, refresh=refresh, deadline=Deadline.after(15)
+                result = await run_in_threadpool(
+                    repository.search,
+                    query,
+                    refresh=refresh,
+                    deadline=Deadline.after(15),
                 )
             finally:
                 connector.close()
@@ -1333,12 +1344,14 @@ def create_local_app(
                 connector.close()
             gateway = ProviderGateway(context, UsageLedger(storage))
             try:
-                result = PropertySummaryService(
+                service = PropertySummaryService(
                     context,
                     storage,
                     gateway,
                     CredentialResolver(context),
-                ).summarize(
+                )
+                result = await run_in_threadpool(
+                    service.summarize,
                     fixed_result,
                     question=question,
                     deadline=Deadline.after(context.settings.answer_deadline_seconds),
@@ -1407,8 +1420,9 @@ def create_local_app(
                 raise ValueError("Retention request contains unsupported fields.")
             if "apply" in payload and not isinstance(payload["apply"], bool):
                 raise ValueError("Retention apply must be true or false.")
-            result = WorkspaceRetentionService(storage, context.settings).run(
-                apply=payload.get("apply") is True
+            result = await run_in_threadpool(
+                WorkspaceRetentionService(storage, context.settings).run,
+                apply=payload.get("apply") is True,
             )
         except (AttributeError, TypeError, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1920,8 +1934,11 @@ def create_local_app(
                 context, storage, property_connector_factory
             )
             try:
-                result = repository.search(
-                    query, refresh=refresh, deadline=Deadline.after(15)
+                result = await run_in_threadpool(
+                    repository.search,
+                    query,
+                    refresh=refresh,
+                    deadline=Deadline.after(15),
                 )
             finally:
                 connector.close()
@@ -1951,7 +1968,15 @@ def create_local_app(
                 "refresh",
             }:
                 raise DossierError("Dossier request contains unsupported fields.")
-            query = _property_query(payload.get("query"))
+            identity = PropertyDossierService(storage).get_identity(identity_id)
+            building_id = identity["identifiers"].get("hpd_building_id")
+            query_payload = dict(payload.get("query") or {})
+            if query_payload.get("building_id") not in (None, building_id):
+                raise DossierError(
+                    "Dossier query does not match the confirmed building."
+                )
+            query_payload["building_id"] = building_id
+            query = _property_query(query_payload)
             panels = payload.get("panels")
             if panels is not None and (
                 not isinstance(panels, list)
@@ -1962,7 +1987,8 @@ def create_local_app(
                 context, storage, property_connector_factory
             )
             try:
-                result = repository.search(
+                result = await run_in_threadpool(
+                    repository.search,
                     query,
                     refresh=payload.get("refresh") is True,
                     deadline=Deadline.after(15),
@@ -2034,7 +2060,8 @@ def create_local_app(
                 raise CorpusValidationError(
                     "languages must be a list of language codes."
                 )
-            result = ExtractionService(storage).run(
+            result = await run_in_threadpool(
+                ExtractionService(storage).run,
                 resource_id,
                 operation=str(payload.get("operation", "inspect")),
                 pages=pages,

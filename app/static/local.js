@@ -1677,7 +1677,7 @@ byId("settings-form").addEventListener("submit", async (event) => {
         reading_style: byId("default-reading-style").value,
       }),
     });
-    byId("settings-status").textContent = "Changes saved. Restart before starting new provider-backed work.";
+    byId("settings-status").textContent = "Changes saved. New work and provider requests use the updated settings.";
     await loadUsage();
   } catch (error) {
     byId("settings-status").textContent = error.message;

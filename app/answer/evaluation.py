@@ -14,6 +14,7 @@ from app.providers.profiles import (
     ProviderProfile,
     get_configured_profile,
 )
+from app.providers.tokens import input_token_bound
 from app.retrieval.review_cases import load_legal_review_cases
 from app.storage.database import LocalStorage
 from app.usage.ledger import SpendDenied, UsageLedger
@@ -100,9 +101,7 @@ def run_answer_evaluation(
 ) -> AnswerEvaluationReport:
     estimate = estimate_answer_evaluation(context, case_file=case_file)
     answer_profile = get_configured_profile(context.settings, ProfileKind.ANSWER)
-    embedding_profile = get_configured_profile(
-        context.settings, ProfileKind.EMBEDDING
-    )
+    embedding_profile = get_configured_profile(context.settings, ProfileKind.EMBEDDING)
     if (
         not answer_profile.compatibility_verified
         or not embedding_profile.compatibility_verified
@@ -148,7 +147,9 @@ def run_answer_evaluation(
     cases = [item for item in payload["cases"] if item["route"] == "legal"]
     evaluation_id = str(uuid.uuid4())
     before = budget_before
-    gateway = ProviderGateway(bounded_context, UsageLedger(storage))
+    gateway = ProviderGateway(
+        bounded_context, UsageLedger(storage), operation_cap_usd=hard_cap
+    )
     results: list[AnswerEvaluationCase] = []
     execution_status = "complete"
     try:
@@ -260,7 +261,7 @@ def _maximum_answer_cost(profile: ProviderProfile) -> Decimal:
 def _embedding_question_cost(profile: ProviderProfile, question: str) -> Decimal:
     if profile.input_usd_per_million is None:
         raise ValueError("Embedding evaluation profile price is unknown.")
-    tokens = max(1, (len(question.encode("utf-8")) + 3) // 4)
+    tokens = input_token_bound(question)
     return Decimal(tokens) * profile.input_usd_per_million / Decimal(1_000_000)
 
 

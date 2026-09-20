@@ -139,9 +139,7 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
     def downloader(_context, slugs, *, progress):
         assert slugs == ["ny-rpapl"]
         progress("Downloading source 1/1: ny-rpapl")
-        return [
-            _artifact(f"§ 711. Grounds for summary proceedings\n{long_evidence}")
-        ]
+        return [_artifact(f"§ 711. Grounds for summary proceedings\n{long_evidence}")]
 
     monkeypatch.setattr("app.jobs.maintenance.download_source_artifacts", downloader)
     app = create_local_app(
@@ -229,8 +227,7 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             ).wait_for()
             result = page.locator("#research-result")
             assert (
-                result.locator(".answer-header h3").text_content()
-                == "Generated answer"
+                result.locator(".answer-header h3").text_content() == "Generated answer"
             )
             assert result.locator(".answer-sources").get_attribute("open") is None
             citation_button = page.get_by_role(
@@ -263,7 +260,8 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             ).wait_for()
             page.locator("#settings-form button[type=submit]").click()
             page.get_by_text(
-                "Changes saved. Restart before starting new provider-backed work."
+                "Changes saved. New work and provider requests "
+                "use the updated settings."
             ).wait_for()
             fixture_credential = "sk-browser-setup-fixture-value"
             page.fill("#provider-key", fixture_credential)
@@ -307,9 +305,10 @@ def test_complete_local_browser_journey(tmp_path, monkeypatch) -> None:
             page.locator("#research-result").get_by_text(
                 "Generation", exact=False
             ).wait_for()
-            assert "Property mode resolved" not in page.locator(
-                "#research-result"
-            ).inner_text()
+            assert (
+                "Property mode resolved"
+                not in page.locator("#research-result").inner_text()
+            )
             browser.close()
     finally:
         server.should_exit = True

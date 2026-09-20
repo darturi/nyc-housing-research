@@ -150,10 +150,16 @@ class PropertyDossierService:
         if any(panel not in KNOWN_PANELS for panel in requested):
             raise DossierError("Dossier request contains an unknown panel.")
         expected_building = identity["identifiers"].get("hpd_building_id")
-        record_buildings = {
-            row.building_id for row in result.records if row.building_id
-        }
-        if record_buildings and expected_building not in record_buildings:
+        if (
+            not expected_building
+            or result.requires_selection
+            or result.query.building_id != expected_building
+            or any(row.building_id != expected_building for row in result.records)
+            or any(
+                candidate.building_id != expected_building
+                for candidate in result.candidates
+            )
+        ):
             raise DossierError("Property result does not match the confirmed building.")
         panel_payload: dict[str, object] = {}
         for panel in requested:

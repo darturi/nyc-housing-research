@@ -45,7 +45,7 @@ def run_resource_mutation[T](
 
 class ResourceJobs:
     def __init__(self, context: WorkspaceContext, storage: LocalStorage) -> None:
-        self._context = context
+        self._base_context = context
         self._storage = storage
         self._jobs = JobService(storage.state_engine)
         self._jobs.recover_interrupted()
@@ -56,6 +56,10 @@ class ResourceJobs:
         self._lock = threading.Lock()
         self._staging = context.paths.artifacts / "resource-staging"
         self._staging.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def _context(self) -> WorkspaceContext:
+        return self._base_context.current()
 
     def submit_add(
         self,
@@ -127,7 +131,12 @@ class ResourceJobs:
         return self._jobs.get(job_id)
 
     def cancel(self, job_id: str) -> JobRecord:
-        return self._jobs.request_cancel(job_id)
+        record = self._jobs.request_cancel(job_id)
+        if record.state == JobState.CANCELLED:
+            stage_id = record.resume.get("stage_id")
+            if isinstance(stage_id, str):
+                self._cleanup_stage(stage_id)
+        return record
 
     def resume(self, job_id: str) -> JobRecord:
         existing = self._jobs.get(job_id)
@@ -186,9 +195,7 @@ class ResourceJobs:
                 result = service.add(
                     content,
                     filename=str(metadata_payload["filename"]),
-                    content_type=_optional_string(
-                        metadata_payload.get("content_type")
-                    ),
+                    content_type=_optional_string(metadata_payload.get("content_type")),
                     metadata=resource_metadata,
                     operation_id=job_id,
                 )
@@ -197,9 +204,7 @@ class ResourceJobs:
                     str(metadata_payload["resource_id"]),
                     content,
                     filename=str(metadata_payload["filename"]),
-                    content_type=_optional_string(
-                        metadata_payload.get("content_type")
-                    ),
+                    content_type=_optional_string(metadata_payload.get("content_type")),
                     metadata=resource_metadata,
                     expected_version_id=_optional_string(
                         metadata_payload.get("expected_version_id")
@@ -252,7 +257,16 @@ class ResourceJobs:
             except Exception:
                 pass
         finally:
-            storage.close()
+            try:
+                current = jobs.get(job_id)
+                if current.state in {JobState.CANCELLED, JobState.SUCCEEDED} or (
+                    current.state == JobState.FAILED and not current.retryable
+                ):
+                    stage_id = current.resume.get("stage_id")
+                    if isinstance(stage_id, str):
+                        self._cleanup_stage(stage_id)
+            finally:
+                storage.close()
 
     def _write_stage(
         self, stage_id: str, content: bytes, metadata: dict[str, object]

@@ -179,7 +179,7 @@ def test_protected_api_search_settings_credentials_and_usage(
             "/api/v1/credentials/openai/validation-estimate"
         )
         assert validation_estimate.status_code == 200
-        assert validation_estimate.json()["estimated_cost_usd"] == "1.2E-7"
+        assert validation_estimate.json()["estimated_cost_usd"] == "4.2E-7"
         unapproved_validation = client.post(
             "/api/v1/credentials/openai/validate",
             headers=_mutation_headers(csrf),

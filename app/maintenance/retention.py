@@ -10,12 +10,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, insert, select, update
 
+from app.maintenance.barrier import MaintenanceBarrier
 from app.storage.database import LocalStorage
 from app.storage.schema import (
     application_settings,
     jobs,
-    maintenance_state,
-    paid_call_leases,
     property_cache,
     usage_events,
 )
@@ -44,6 +43,8 @@ class RetentionResult:
     candidate_cache_artifacts: int
     candidate_log_files: int
     candidate_file_bytes: int
+    candidate_staging_files: int = 0
+    removed_staging_files: int = 0
     removed_jobs: int = 0
     removed_usage_attempts: int = 0
     removed_usage_events: int = 0
@@ -74,6 +75,7 @@ class _RetentionPlan:
     cache_keys: tuple[str, ...]
     cache_artifacts: tuple[Path, ...]
     log_files: tuple[Path, ...]
+    staging_files: tuple[Path, ...]
     candidate_file_bytes: int
     protected_active_jobs: int
     protected_unresolved_usage_attempts: int
@@ -87,6 +89,7 @@ class WorkspaceRetentionService:
     def __init__(self, storage: LocalStorage, settings: LocalSettings) -> None:
         self._storage = storage
         self._settings = settings
+        self._barrier = MaintenanceBarrier(storage.state_engine)
 
     def run(
         self, *, apply: bool = False, now: datetime | None = None
@@ -137,6 +140,7 @@ class WorkspaceRetentionService:
             row["id"]
             for row in job_rows
             if row["state"] in TERMINAL_JOB_STATES
+            and not (row["state"] == "failed" and row["retryable"])
             and _aware(row["updated_at"]) < operational_cutoff
         )
         protected_active_jobs = sum(
@@ -182,9 +186,12 @@ class WorkspaceRetentionService:
             if reserve is None or final_status in {"reserved", "uncertain"}:
                 protected_unresolved += 1
                 continue
-            if _budget_month(
-                _aware(reserve["created_at"]), self._settings.budget_timezone
-            ) == current_month:
+            if (
+                _budget_month(
+                    _aware(reserve["created_at"]), self._settings.budget_timezone
+                )
+                == current_month
+            ):
                 protected_current += 1
                 continue
             if max(_aware(row["created_at"]) for row in rows) < usage_cutoff:
@@ -195,7 +202,23 @@ class WorkspaceRetentionService:
         )
 
         log_files = tuple(self._old_log_files(operational_cutoff))
-        file_paths = set(cache_artifacts) | set(log_files)
+        protected_stages = {
+            json.loads(row["resume_json"]).get("stage_id")
+            for row in job_rows
+            if row["state"] not in TERMINAL_JOB_STATES
+            or (row["state"] == "failed" and row["retryable"])
+        }
+        stage_root = self._storage.paths.artifacts / "resource-staging"
+        staging_files = tuple(
+            path
+            for path in stage_root.glob("*")
+            if path.suffix in {".bin", ".json"}
+            and path.stem not in protected_stages
+            and not path.is_symlink()
+            and path.is_file()
+            and datetime.fromtimestamp(path.stat().st_mtime, UTC) < operational_cutoff
+        )
+        file_paths = set(cache_artifacts) | set(log_files) | set(staging_files)
         candidate_file_bytes = sum(_regular_file_size(path) for path in file_paths)
         return _RetentionPlan(
             now=now,
@@ -208,6 +231,7 @@ class WorkspaceRetentionService:
             cache_keys=tuple(candidate_cache_keys),
             cache_artifacts=tuple(cache_artifacts),
             log_files=log_files,
+            staging_files=staging_files,
             candidate_file_bytes=candidate_file_bytes,
             protected_active_jobs=protected_active_jobs,
             protected_unresolved_usage_attempts=protected_unresolved,
@@ -278,12 +302,14 @@ class WorkspaceRetentionService:
         result = {
             "cache_artifacts": 0,
             "log_files": 0,
+            "staging_files": 0,
             "file_bytes": 0,
             "failures": 0,
         }
         for kind, paths in (
             ("cache_artifacts", plan.cache_artifacts),
             ("log_files", plan.log_files),
+            ("staging_files", plan.staging_files),
         ):
             for path in paths:
                 size = _regular_file_size(path)
@@ -312,9 +338,7 @@ class WorkspaceRetentionService:
             return
         for current, directories, filenames in os.walk(root, followlinks=False):
             directories[:] = [
-                name
-                for name in directories
-                if not (Path(current) / name).is_symlink()
+                name for name in directories if not (Path(current) / name).is_symlink()
             ]
             for filename in filenames:
                 path = Path(current) / filename
@@ -322,9 +346,10 @@ class WorkspaceRetentionService:
                     metadata = path.lstat()
                 except OSError:
                     continue
-                if stat.S_ISREG(metadata.st_mode) and datetime.fromtimestamp(
-                    metadata.st_mtime, UTC
-                ) < cutoff:
+                if (
+                    stat.S_ISREG(metadata.st_mode)
+                    and datetime.fromtimestamp(metadata.st_mtime, UTC) < cutoff
+                ):
                     yield path
 
     def _safe_cache_artifact(self, relative: str) -> Path | None:
@@ -340,48 +365,13 @@ class WorkspaceRetentionService:
         return path
 
     def _enter_barrier(self, now: datetime) -> None:
-        connection = self._storage.state_engine.connect()
         try:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
-            if connection.scalar(
-                select(maintenance_state.c.active).where(maintenance_state.c.id == 1)
-            ):
-                raise RetentionError(
-                    "Another workspace maintenance operation is active."
-                )
-            active_job = connection.scalar(
-                select(jobs.c.id).where(jobs.c.state.in_(ACTIVE_JOB_STATES))
-            )
-            if active_job:
-                raise RetentionError(
-                    "Pause, cancel, or finish active jobs before applying retention."
-                )
-            connection.execute(
-                delete(paid_call_leases).where(paid_call_leases.c.expires_at <= now)
-            )
-            if connection.scalar(select(paid_call_leases.c.attempt_id)):
-                raise RetentionError(
-                    "Finish active provider calls before applying retention."
-                )
-            connection.execute(
-                update(maintenance_state)
-                .where(maintenance_state.c.id == 1)
-                .values(active=True, operation="retention", started_at=now)
-            )
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+            self._barrier.enter("retention", now)
+        except RuntimeError as exc:
+            raise RetentionError(str(exc)) from exc
 
     def _leave_barrier(self) -> None:
-        with self._storage.state_engine.begin() as connection:
-            connection.execute(
-                update(maintenance_state)
-                .where(maintenance_state.c.id == 1)
-                .values(active=False, operation=None, started_at=None)
-            )
+        self._barrier.leave()
 
     @staticmethod
     def _result(
@@ -406,6 +396,8 @@ class WorkspaceRetentionService:
             candidate_cache_artifacts=len(plan.cache_artifacts),
             candidate_log_files=len(plan.log_files),
             candidate_file_bytes=plan.candidate_file_bytes,
+            candidate_staging_files=len(plan.staging_files),
+            removed_staging_files=file_results.get("staging_files", 0),
             removed_jobs=removed.get("jobs", 0),
             removed_usage_attempts=(
                 len(plan.usage_attempt_ids) if removed.get("usage_events", 0) else 0

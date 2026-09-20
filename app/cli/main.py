@@ -464,6 +464,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     usage = commands.add_parser("usage", help="Show local API spend accounting.")
     usage.add_argument("--json", action="store_true")
+    usage.add_argument("--reconcile", metavar="ATTEMPT_ID")
+    usage.add_argument("--actual-usd")
+    usage.add_argument("--reason")
+    usage.add_argument("--attempts", action="store_true")
 
     ask = commands.add_parser(
         "ask", help="Generate a cited answer from local evidence."
@@ -747,7 +751,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "profiles":
             return _profiles(context, args)
         if args.command == "usage":
-            return _usage(context, as_json=args.json)
+            return _usage(
+                context,
+                as_json=args.json,
+                reconcile=args.reconcile,
+                actual_usd=args.actual_usd,
+                reason=args.reason,
+                attempts=args.attempts,
+            )
         if args.command == "ask":
             return _ask(context, args)
         if args.command == "matters":
@@ -1914,9 +1925,30 @@ def _profiles(context: WorkspaceContext, args: argparse.Namespace) -> int:
     return 0
 
 
-def _usage(context: WorkspaceContext, *, as_json: bool) -> int:
+def _usage(
+    context: WorkspaceContext,
+    *,
+    as_json: bool,
+    reconcile: str | None = None,
+    actual_usd: str | None = None,
+    reason: str | None = None,
+    attempts: bool = False,
+) -> int:
     storage = _initialized_storage(context)
     try:
+        if reconcile:
+            if actual_usd is None or not reason:
+                raise ValueError("Reconciliation requires --actual-usd and --reason.")
+            amount = Decimal(actual_usd)
+            if not amount.is_finite() or amount < 0:
+                raise ValueError("Actual cost must be finite and nonnegative.")
+            UsageLedger(storage).correct_uncertain(
+                reconcile,
+                actual_usd=amount,
+                reason=reason,
+            )
+        elif actual_usd is not None or reason is not None:
+            raise ValueError("Use --reconcile with a cost correction.")
         summary = UsageLedger(storage).summary(
             monthly_cap_usd=Decimal(context.settings.monthly_budget_usd),
             timezone=context.settings.budget_timezone,
@@ -1938,6 +1970,8 @@ def _usage(context: WorkspaceContext, *, as_json: bool) -> int:
                 context.settings.max_concurrent_paid_requests
             ),
         }
+        if attempts:
+            payload["attempts"] = UsageLedger(storage).unresolved_attempts()
         _write(payload, as_json=as_json)
         return 0
     finally:

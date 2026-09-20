@@ -315,11 +315,13 @@ class LocalSearch:
                     bm25(chunk_fts, 0.0, 0.0, 10.0, 8.0, 1.0) AS rank
                 FROM chunk_fts
                 JOIN chunks c ON c.id = chunk_fts.chunk_id
+                JOIN generation_chunks gc ON gc.chunk_id = c.id
                 JOIN source_modules sm ON sm.id = c.source_module_id
                 JOIN source_versions sv ON sv.id = c.source_version_id
                 JOIN documents d ON d.id = c.document_id
                 WHERE chunk_fts MATCH :query
-                  AND chunk_fts.generation_id = :generation_id
+                  AND gc.generation_id = :generation_id
+                  AND chunk_fts.generation_id = '__shared__'
                   AND {where_clause}
                 ORDER BY rank ASC, c.id ASC
                 LIMIT :limit
@@ -360,9 +362,31 @@ class LocalSearch:
                 connection, generation_id, profile_id, profile["dimension"]
             ),
         )
+        # Generations freeze content, not a resource's current permissions or
+        # metadata. Never authorize model use using a cached source row.
+        sources = {
+            row["slug"]: dict(row)
+            for row in connection.execute(select(source_modules)).mappings()
+        }
+        current_rows = []
+        for cached in index.rows:
+            source = sources.get(cached["source_slug"])
+            row = dict(cached)
+            if source is None:
+                row["model_use_allowed"] = False
+            else:
+                row.update(
+                    source_name=source["name"],
+                    source_type=source["source_type"],
+                    jurisdiction=source["jurisdiction"],
+                    origin=source["origin"],
+                    publisher=source["publisher"],
+                    model_use_allowed=source["model_use_allowed"],
+                )
+            current_rows.append(row)
         eligible = [
             index_number
-            for index_number, row in enumerate(index.rows)
+            for index_number, row in enumerate(current_rows)
             if _row_matches_filters(row, filters)
         ]
         if not eligible:
@@ -380,7 +404,7 @@ class LocalSearch:
             candidate_indices = candidate_indices[local_top]
             scores = scores[local_top]
         ranked = [
-            (index.rows[int(row_index)], float(score))
+            (current_rows[int(row_index)], float(score))
             for row_index, score in zip(candidate_indices, scores, strict=True)
             if math.isfinite(float(score))
         ]

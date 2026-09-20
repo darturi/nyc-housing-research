@@ -128,6 +128,14 @@ def test_retention_preview_and_apply_preserve_accounting_invariants(tmp_path) ->
     _settled(ledger, "current-settled", NOW)
     _unresolved(ledger, "old-reserved", uncertain=False)
     _unresolved(ledger, "old-uncertain", uncertain=True)
+    # Historical reservations had no process owner. An expired legacy lease is
+    # recoverable; the current live process must not impersonate that old owner.
+    with storage.state_engine.begin() as connection:
+        connection.execute(
+            update(usage_events)
+            .where(usage_events.c.attempt_id == "old-reserved")
+            .values(price_snapshot_json='{"fixture": true}')
+        )
     _cache_row(storage, "old-unpinned", pinned=False)
     _cache_row(storage, "old-pinned", pinned=True)
     old_log = context.paths.logs / "old.log"

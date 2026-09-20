@@ -9,7 +9,9 @@ from typing import Any
 
 from sqlalchemy import Engine, insert, or_, select, update
 
-from app.storage.schema import jobs, maintenance_state
+from app.maintenance.barrier import maintenance_active
+from app.storage.schema import jobs
+from app.workspace.locks import owner_alive, process_owner
 
 
 class JobState(StrEnum):
@@ -106,6 +108,7 @@ class JobService:
                     job_type=job_type,
                     target_id=target_id,
                     state=JobState.QUEUED.value,
+                    lease_owner=process_owner(self._engine),
                     stage=stage,
                     progress_current=0,
                     progress_total=None,
@@ -168,7 +171,7 @@ class JobService:
                 .where(jobs.c.id == job_id)
                 .values(
                     state=JobState.RUNNING.value,
-                    lease_owner=worker_id,
+                    lease_owner=self._worker_owner(worker_id),
                     lease_expires_at=now + timedelta(seconds=lease_seconds),
                     updated_at=now,
                 )
@@ -184,7 +187,7 @@ class JobService:
                 update(jobs)
                 .where(
                     jobs.c.id == job_id,
-                    jobs.c.lease_owner == worker_id,
+                    jobs.c.lease_owner == self._worker_owner(worker_id),
                     jobs.c.state.in_(
                         [JobState.RUNNING.value, JobState.CANCEL_REQUESTED.value]
                     ),
@@ -216,7 +219,7 @@ class JobService:
                 update(jobs)
                 .where(
                     jobs.c.id == job_id,
-                    jobs.c.lease_owner == worker_id,
+                    jobs.c.lease_owner == self._worker_owner(worker_id),
                     jobs.c.state.in_(
                         [JobState.RUNNING.value, JobState.CANCEL_REQUESTED.value]
                     ),
@@ -295,7 +298,7 @@ class JobService:
                 update(jobs)
                 .where(
                     jobs.c.id == job_id,
-                    jobs.c.lease_owner == worker_id,
+                    jobs.c.lease_owner == self._worker_owner(worker_id),
                     jobs.c.state.in_(
                         [JobState.RUNNING.value, JobState.CANCEL_REQUESTED.value]
                     ),
@@ -339,6 +342,7 @@ class JobService:
                 .where(jobs.c.id == job_id)
                 .values(
                     state=JobState.QUEUED.value,
+                    lease_owner=process_owner(self._engine),
                     stage="queued",
                     error_code=None,
                     error_message=None,
@@ -354,15 +358,25 @@ class JobService:
             rows = connection.execute(
                 select(jobs).where(
                     jobs.c.state.in_(
-                        [JobState.RUNNING.value, JobState.CANCEL_REQUESTED.value]
-                    ),
-                    or_(
-                        jobs.c.lease_expires_at.is_(None),
-                        jobs.c.lease_expires_at <= now,
-                    ),
+                        [
+                            JobState.QUEUED.value,
+                            JobState.RUNNING.value,
+                            JobState.CANCEL_REQUESTED.value,
+                        ]
+                    )
                 )
             ).mappings()
             for row in rows:
+                alive = owner_alive(self._engine, row["lease_owner"])
+                expiry = row["lease_expires_at"]
+                if expiry is not None and expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=UTC)
+                expired = expiry is not None and expiry <= now
+                legacy_orphan = alive is None and (
+                    row["state"] == JobState.QUEUED.value or expiry is None or expired
+                )
+                if alive is not False and not expired and not legacy_orphan:
+                    continue
                 resumable = row["job_type"] in RESUMABLE_JOB_TYPES
                 connection.execute(
                     update(jobs)
@@ -404,7 +418,7 @@ class JobService:
                 update(jobs)
                 .where(
                     jobs.c.id == job_id,
-                    jobs.c.lease_owner == worker_id,
+                    jobs.c.lease_owner == self._worker_owner(worker_id),
                     jobs.c.state == required_state.value,
                 )
                 .values(
@@ -432,12 +446,13 @@ class JobService:
 
     @staticmethod
     def _assert_no_maintenance(connection) -> None:
-        if connection.scalar(
-            select(maintenance_state.c.active).where(maintenance_state.c.id == 1)
-        ):
+        if maintenance_active(connection):
             raise JobConflict(
                 "Workspace maintenance is active; no job was admitted or resumed."
             )
+
+    def _worker_owner(self, worker_id: str) -> str:
+        return f"{process_owner(self._engine)}:{worker_id}"
 
     def _immediate_transaction(self):
         return _ImmediateTransaction(self._engine)

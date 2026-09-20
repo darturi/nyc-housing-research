@@ -39,7 +39,7 @@ class InteractiveAnswerJobs:
         *,
         expiry_minutes: int = 30,
     ) -> None:
-        self._context = context
+        self._base_context = context
         self._storage = storage
         self._jobs = JobService(storage.state_engine)
         self._jobs.recover_interrupted()
@@ -48,6 +48,10 @@ class InteractiveAnswerJobs:
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="answer")
         self._expiry = timedelta(minutes=expiry_minutes)
+
+    @property
+    def _context(self) -> WorkspaceContext:
+        return self._base_context.current()
 
     def submit(
         self,

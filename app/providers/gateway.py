@@ -10,6 +10,7 @@ import httpx
 
 from app.jobs.runtime import CancellationSignal, Deadline
 from app.providers.profiles import ProfileKind, ProviderProfile
+from app.providers.tokens import input_token_bound
 from app.usage.ledger import UsageLedger, UsageReservation
 from app.workspace.context import WorkspaceContext
 
@@ -46,11 +47,21 @@ class ProviderGateway:
         ledger: UsageLedger,
         *,
         client: httpx.Client | None = None,
+        operation_cap_usd: Decimal | None = None,
     ) -> None:
-        self._context = context
+        self._base_context = context
         self._ledger = ledger
         self._client = client or httpx.Client(trust_env=False, follow_redirects=False)
         self._owns_client = client is None
+        if operation_cap_usd is not None and (
+            not operation_cap_usd.is_finite() or operation_cap_usd < 0
+        ):
+            raise ValueError("Operation cost ceiling must be finite and nonnegative.")
+        self._operation_cap = operation_cap_usd
+
+    @property
+    def _context(self) -> WorkspaceContext:
+        return self._base_context.current()
 
     def close(self) -> None:
         if self._owns_client:
@@ -67,6 +78,7 @@ class ProviderGateway:
         cancellation: CancellationSignal | None = None,
         allow_unknown_cost: bool = False,
         on_text_delta: Callable[[str], None] | None = None,
+        operation_cap_usd: Decimal | None = None,
     ) -> ProviderAnswer:
         if profile.kind != ProfileKind.ANSWER:
             raise ProviderExecutionError("Selected profile is not an answer profile.")
@@ -87,7 +99,11 @@ class ProviderGateway:
             self._context.network.assert_url_allowed(
                 profile.endpoint, purpose="answer provider"
             )
-        input_tokens = _estimate_tokens(prompt)
+        input_tokens = input_token_bound(prompt, answer=True)
+        if input_tokens > profile.max_input_tokens:
+            raise ProviderExecutionError(
+                "Answer input exceeds the profile token limit."
+            )
         output_tokens = profile.max_output_tokens or 0
         projected = _cost(profile, input_tokens, output_tokens)
         snapshot = _price_snapshot(profile)
@@ -98,6 +114,7 @@ class ProviderGateway:
             projected,
             snapshot,
             allow_unknown_cost=allow_unknown_cost,
+            operation_cap_usd=operation_cap_usd,
         )
         if profile.provider == "fake":
             marker = "[P1]" if "Property evidence:" in prompt else "[E1]"
@@ -315,6 +332,7 @@ class ProviderGateway:
         deadline: Deadline | None = None,
         cancellation: CancellationSignal | None = None,
         allow_unknown_cost: bool = False,
+        operation_cap_usd: Decimal | None = None,
     ) -> ProviderEmbeddings:
         if profile.kind != ProfileKind.EMBEDDING or profile.dimension is None:
             raise ProviderExecutionError(
@@ -339,7 +357,12 @@ class ProviderGateway:
             self._context.network.assert_url_allowed(
                 profile.endpoint, purpose="embedding provider"
             )
-        input_tokens = sum(_estimate_tokens(value) for value in inputs)
+        bounds = [input_token_bound(value) for value in inputs]
+        if any(bound > profile.max_input_tokens for bound in bounds):
+            raise ProviderExecutionError(
+                "Embedding input exceeds the profile token limit."
+            )
+        input_tokens = sum(bounds)
         projected = _cost(profile, input_tokens, 0)
         snapshot = _price_snapshot(profile)
         reservation = self._reserve(
@@ -349,6 +372,7 @@ class ProviderGateway:
             projected,
             snapshot,
             allow_unknown_cost=allow_unknown_cost,
+            operation_cap_usd=operation_cap_usd,
         )
         if profile.provider == "fake":
             vectors = tuple(
@@ -437,7 +461,16 @@ class ProviderGateway:
         snapshot,
         *,
         allow_unknown_cost=False,
+        operation_cap_usd=None,
     ):
+        caps = [Decimal(self._context.settings.per_operation_budget_usd)]
+        for cap in (self._operation_cap, operation_cap_usd):
+            if cap is not None:
+                if not cap.is_finite() or cap < 0:
+                    raise ValueError(
+                        "Operation cost ceiling must be finite and nonnegative."
+                    )
+                caps.append(cap)
         cost_known = profile.pricing_verified
         if not cost_known and not allow_unknown_cost:
             raise ProviderExecutionError(
@@ -452,9 +485,7 @@ class ProviderGateway:
             profile_id=profile.id,
             projected_usd=projected or Decimal("0"),
             monthly_cap_usd=Decimal(self._context.settings.monthly_budget_usd),
-            per_operation_cap_usd=Decimal(
-                self._context.settings.per_operation_budget_usd
-            ),
+            per_operation_cap_usd=min(caps),
             timezone=self._context.settings.budget_timezone,
             price_snapshot=snapshot,
             max_concurrent=self._context.settings.max_concurrent_paid_requests,

@@ -99,8 +99,9 @@ def prepare_workspace(context: WorkspaceContext) -> LocalStorage:
             }:
                 raise SchemaVersionError(
                     "The existing workspace is incomplete or requires a different "
-                    "application version. Restore a compatible backup or use the "
-                    "matching release; setup will not replace its databases."
+                    "schema version. Run `nyc-housing migrate preflight` to check "
+                    "for a backed-up upgrade, or restore a compatible backup; "
+                    "setup will not replace its databases."
                 )
         else:
             storage.initialize()

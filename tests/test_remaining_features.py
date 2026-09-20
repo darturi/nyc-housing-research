@@ -437,7 +437,7 @@ def test_state_v1_to_v2_migration_adds_research_tables(tmp_path) -> None:
     assert migrated.to_state_version == 2
     storage = LocalStorage.open(context.paths)
     try:
-        assert storage.versions() == {"corpus": 2, "state": 2}
+        assert storage.versions() == {"corpus": 3, "state": 2}
         with storage.state_engine.connect() as connection:
             assert (
                 connection.scalar(

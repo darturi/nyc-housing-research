@@ -11,6 +11,7 @@ from app.providers.profiles import (
     get_profile,
     profile_override_fingerprint,
 )
+from app.providers.tokens import input_token_bound
 from app.storage.database import LocalStorage
 from app.usage.ledger import SpendDenied, UsageLedger
 from app.workspace.context import WorkspaceContext
@@ -85,7 +86,7 @@ def credential_validation_estimate(provider: str) -> CredentialValidationEstimat
             "Direct validation is unavailable for this provider; use doctor --online."
         )
     profile = get_profile(profile_id, kind=ProfileKind.EMBEDDING)
-    tokens = max(1, (len(VALIDATION_TEXT.encode("utf-8")) + 3) // 4)
+    tokens = input_token_bound(VALIDATION_TEXT)
     if profile.input_usd_per_million is None:
         raise ValueError("The validation profile has no verified price.")
     cost = (
@@ -126,12 +127,15 @@ def run_credential_validation(
     credential, _source = resolver.resolve(provider)
     if not credential:
         raise ValueError("The provider credential is missing.")
-    active_gateway = gateway or ProviderGateway(context, UsageLedger(storage))
+    active_gateway = gateway or ProviderGateway(
+        context, UsageLedger(storage), operation_cap_usd=max_cost_usd
+    )
     try:
         response = active_gateway.embeddings(
             inputs=[VALIDATION_TEXT],
             profile=profile,
             credential=credential,
+            operation_cap_usd=max_cost_usd,
         )
     finally:
         if gateway is None:
@@ -155,17 +159,18 @@ def profile_compatibility_estimate(
     )
     selection_id = _selection_id(context, kind)
     text = _compatibility_text(kind)
-    input_tokens = max(1, (len(text.encode("utf-8")) + 3) // 4)
+    input_tokens = input_token_bound(text, answer=kind == ProfileKind.ANSWER)
     output_tokens = profile.max_output_tokens or 0
     input_rate = profile.input_usd_per_million
     output_rate = profile.output_usd_per_million or Decimal("0")
     cost = (
         (
-            Decimal(input_tokens) * input_rate
-            + Decimal(output_tokens) * output_rate
-        )
-        / Decimal(1_000_000)
-    ).quantize(Decimal("0.00000001")) if input_rate is not None else None
+            (Decimal(input_tokens) * input_rate + Decimal(output_tokens) * output_rate)
+            / Decimal(1_000_000)
+        ).quantize(Decimal("0.00000001"))
+        if input_rate is not None
+        else None
+    )
     return ProfileCompatibilityEstimate(
         kind=kind.value,
         selection_id=selection_id,
@@ -204,9 +209,7 @@ def run_profile_compatibility_check(
         if max_cost_usd is None:
             raise ValueError("Profile compatibility checks require a cost ceiling.")
         if not max_cost_usd.is_finite() or max_cost_usd < 0:
-            raise ValueError(
-                "Profile compatibility cost ceiling must be nonnegative."
-            )
+            raise ValueError("Profile compatibility cost ceiling must be nonnegative.")
         assert estimate.estimated_cost_usd is not None
         if estimate.estimated_cost_usd > max_cost_usd:
             raise SpendDenied(
@@ -220,8 +223,7 @@ def run_profile_compatibility_check(
             )
         if max_cost_usd is not None:
             raise ValueError(
-                "A USD ceiling cannot cover a request whose provider price is "
-                "unknown."
+                "A USD ceiling cannot cover a request whose provider price is unknown."
             )
     raw_profile = get_configured_profile(
         context.settings, kind, require_compatibility=False
@@ -232,7 +234,9 @@ def run_profile_compatibility_check(
     credential, _source = resolver.resolve(slot)
     if profile.paid and not credential:
         raise ValueError(f"Credential slot {slot!r} is missing.")
-    active_gateway = gateway or ProviderGateway(context, UsageLedger(storage))
+    active_gateway = gateway or ProviderGateway(
+        context, UsageLedger(storage), operation_cap_usd=max_cost_usd
+    )
     try:
         if kind == ProfileKind.EMBEDDING:
             response = active_gateway.embeddings(
@@ -240,6 +244,7 @@ def run_profile_compatibility_check(
                 profile=profile,
                 credential=credential,
                 allow_unknown_cost=allow_unknown_cost,
+                operation_cap_usd=max_cost_usd,
             )
             operation_id = response.operation_id
             input_tokens = response.input_tokens
@@ -251,6 +256,7 @@ def run_profile_compatibility_check(
                 profile=profile,
                 credential=credential,
                 allow_unknown_cost=allow_unknown_cost,
+                operation_cap_usd=max_cost_usd,
             )
             if "[E1]" not in response.text:
                 raise ProviderExecutionError(

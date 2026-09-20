@@ -65,7 +65,7 @@ PROFILES = {
         output_usd_per_million=Decimal("0"),
         max_input_tokens=16_000,
         max_output_tokens=1_000,
-        token_estimator="utf8_bytes_div_4_conservative",
+        token_estimator="utf8_bytes_upper_bound_v1",
         request_timeout_seconds=60.0,
         max_attempts=1,
         price_effective_date=None,
@@ -86,7 +86,7 @@ PROFILES = {
         output_usd_per_million=None,
         max_input_tokens=8_000,
         max_output_tokens=None,
-        token_estimator="utf8_bytes_div_4_conservative",
+        token_estimator="utf8_bytes_upper_bound_v1",
         request_timeout_seconds=60.0,
         max_attempts=1,
         price_effective_date=None,
@@ -107,7 +107,7 @@ PROFILES = {
         output_usd_per_million=Decimal("1.20"),
         max_input_tokens=32_000,
         max_output_tokens=1_200,
-        token_estimator="utf8_bytes_div_4_conservative",
+        token_estimator="utf8_bytes_upper_bound_v1",
         request_timeout_seconds=60.0,
         max_attempts=1,
         price_effective_date="2026-09-14",
@@ -128,7 +128,7 @@ PROFILES = {
         output_usd_per_million=None,
         max_input_tokens=8_191,
         max_output_tokens=None,
-        token_estimator="utf8_bytes_div_4_conservative",
+        token_estimator="utf8_bytes_upper_bound_v1",
         request_timeout_seconds=60.0,
         max_attempts=1,
         price_effective_date="2026-09-14",
@@ -206,9 +206,7 @@ def configured_profile_entries(settings: object) -> list[tuple[str, ProviderProf
     return entries
 
 
-def apply_profile_override(
-    base: ProviderProfile, raw: object
-) -> ProviderProfile:
+def apply_profile_override(base: ProviderProfile, raw: object) -> ProviderProfile:
     if base.provider == "fake":
         raise ValueError("Synthetic profiles cannot use custom endpoints.")
     override = validate_profile_override(base, raw)
@@ -266,9 +264,7 @@ def profile_override_fingerprint(base: ProviderProfile, raw: object) -> str:
     ).hexdigest()
 
 
-def validate_profile_override(
-    base: ProviderProfile, raw: object
-) -> dict[str, Any]:
+def validate_profile_override(base: ProviderProfile, raw: object) -> dict[str, Any]:
     if not isinstance(raw, dict) or set(raw) != PROFILE_OVERRIDE_FIELDS:
         raise ValueError(
             "A custom profile requires endpoint, auth_slot, complete or null "
@@ -308,9 +304,7 @@ def validate_profile_override(
     else:
         input_price = _price(input_value, "input")
         output_price = (
-            _price(output_value, "output")
-            if base.kind == ProfileKind.ANSWER
-            else None
+            _price(output_value, "output") if base.kind == ProfileKind.ANSWER else None
         )
         price_date = str(price_date_value).strip()
         try:
@@ -320,9 +314,7 @@ def validate_profile_override(
                 "Custom profile price_effective_date must be YYYY-MM-DD."
             ) from exc
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", price_date):
-            raise ValueError(
-                "Custom profile price_effective_date must be YYYY-MM-DD."
-            )
+            raise ValueError("Custom profile price_effective_date must be YYYY-MM-DD.")
         price_source = str(price_source_value).strip()
         parsed_source = urlsplit(price_source)
         if parsed_source.scheme != "https" or not parsed_source.hostname:
@@ -396,9 +388,7 @@ def _loopback(hostname: str) -> bool:
         return False
 
 
-def _replace_compatibility(
-    profile: ProviderProfile, verified: bool
-) -> ProviderProfile:
+def _replace_compatibility(profile: ProviderProfile, verified: bool) -> ProviderProfile:
     from dataclasses import replace
 
     return replace(profile, compatibility_verified=verified)

@@ -50,8 +50,10 @@ def test_partial_text_generation_is_deliberate_searchable_and_traceable(corpus) 
     with storage.corpus_engine.connect() as connection:
         matched = connection.scalar(
             text(
-                "SELECT chunk_id FROM chunk_fts "
-                "WHERE generation_id = :generation AND chunk_fts MATCH :query"
+                "SELECT chunk_id FROM chunk_fts WHERE chunk_id IN "
+                "(SELECT chunk_id FROM generation_chunks "
+                "WHERE generation_id = :generation) "
+                "AND chunk_fts MATCH :query"
             ),
             {"generation": generation, "query": "landlord tenant"},
         )

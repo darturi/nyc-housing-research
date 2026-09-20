@@ -9,6 +9,7 @@ from app.auth.dependencies import get_current_user
 from app.db.session import get_db
 from app.hpd.search import search_hpd_violations
 from app.limits.dependencies import enforce_answer_limit, enforce_search_limit
+from app.limits.service import finish_answer_usage
 from app.models.user import User
 from app.query_routing.router import classify_query, hpd_request_from_question
 from app.retrieval.schemas import SearchFilters
@@ -54,8 +55,10 @@ def routed_query(
             detail=str(exc),
         ) from exc
 
+    reservation_id = None
+    completed = False
     try:
-        enforce_answer_limit(request, db, current_user)
+        reservation_id = enforce_answer_limit(request, db, current_user)
         answer_result = generate_answer(
             db,
             current_user,
@@ -63,11 +66,14 @@ def routed_query(
             filters,
             payload.limit,
         )
+        completed = True
     except LLMProviderError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Answer provider is unavailable.",
         ) from exc
+    finally:
+        finish_answer_usage(db, reservation_id, completed=completed)
 
     return RoutedQueryResponse(
         question=payload.question,

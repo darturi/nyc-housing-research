@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.storage.database import LocalStorage
 from app.storage.schema import (
+    comparison_reviews,
     matter_items,
     matter_notes,
     matters,
@@ -336,6 +337,22 @@ class MatterService:
             }
             if not apply:
                 return preview
+            if not matter_id or not remaining:
+                # Deleting a saved item also retires its save receipt. Reusing
+                # that key afterward is a fresh save, never a dangling receipt.
+                connection.execute(
+                    delete(save_receipts).where(save_receipts.c.item_id == item_id)
+                )
+                connection.execute(
+                    delete(comparison_reviews).where(
+                        comparison_reviews.c.item_id == item_id
+                    )
+                )
+                connection.execute(
+                    update(saved_items)
+                    .where(saved_items.c.parent_item_id == item_id)
+                    .values(parent_item_id=None)
+                )
             if matter_id:
                 connection.execute(
                     delete(matter_items).where(

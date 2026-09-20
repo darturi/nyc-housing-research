@@ -41,7 +41,7 @@ class CorpusMaintenanceJobs:
         *,
         downloader: Downloader | None = None,
     ) -> None:
-        self._context = context
+        self._base_context = context
         self._storage = storage
         self._jobs = JobService(storage.state_engine)
         self._jobs.recover_interrupted()
@@ -52,6 +52,10 @@ class CorpusMaintenanceJobs:
         )
         self._futures: dict[str, Future] = {}
         self._lock = threading.Lock()
+
+    @property
+    def _context(self) -> WorkspaceContext:
+        return self._base_context.current()
 
     def estimate_index(self) -> tuple[IndexingEstimate, bool, str | None]:
         profile = get_configured_profile(self._context.settings, ProfileKind.EMBEDDING)
@@ -350,7 +354,7 @@ class CorpusMaintenanceJobs:
         raw_ceiling = record.resume.get("max_cost_usd")
         ceiling = Decimal(str(raw_ceiling)) if raw_ceiling is not None else None
         ledger = UsageLedger(storage)
-        gateway = ProviderGateway(self._context, ledger)
+        gateway = ProviderGateway(self._context, ledger, operation_cap_usd=ceiling)
         try:
             indexer = CorpusEmbeddingIndexer(storage, gateway)
             estimate = indexer.estimate_active(profile)

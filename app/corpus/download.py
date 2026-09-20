@@ -200,15 +200,34 @@ def _get(
     last_error: Exception | None = None
     for attempt in range(DEFAULT_RETRIES + 1):
         try:
-            response = client.get(url, headers=headers)
-            if response.status_code == 304:
-                return response
-            response.raise_for_status()
-            if len(response.content) > MAX_ARTIFACT_BYTES:
-                raise SourceDownloadError(
-                    f"Source {purpose} exceeds the {MAX_ARTIFACT_BYTES}-byte limit."
+            with client.stream("GET", url, headers=headers) as response:
+                if response.status_code == 304:
+                    response.read()
+                    return response
+                response.raise_for_status()
+                size = response.headers.get("Content-Length")
+                if size and size.isdigit() and int(size) > MAX_ARTIFACT_BYTES:
+                    raise SourceDownloadError(
+                        f"Source {purpose} exceeds the byte limit."
+                    )
+                content = bytearray()
+                for piece in response.iter_bytes(chunk_size=64 * 1024):
+                    if len(content) + len(piece) > MAX_ARTIFACT_BYTES:
+                        raise SourceDownloadError(
+                            f"Source {purpose} exceeds the "
+                            f"{MAX_ARTIFACT_BYTES}-byte limit."
+                        )
+                    content.extend(piece)
+                response_headers = dict(response.headers)
+                # iter_bytes has decoded the transfer; do not decode it twice.
+                response_headers.pop("content-encoding", None)
+                response_headers.pop("content-length", None)
+                return httpx.Response(
+                    response.status_code,
+                    headers=response_headers,
+                    content=bytes(content),
+                    request=response.request,
                 )
-            return response
         except (httpx.HTTPError, SourceDownloadError) as exc:
             last_error = exc
             if attempt < DEFAULT_RETRIES and _retryable(exc):

@@ -8,6 +8,36 @@ permissions:
   contents: read
 
 jobs:
+  legacy-integration:
+    name: Hosted runtime and concurrent budget admission
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hardening
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - run: uv sync --locked --extra dev
+      - name: Exercise concurrent admission on SQLite and PostgreSQL
+        env:
+          NYC_HOUSING_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@localhost:5432/hardening
+        run: uv run pytest tests/test_hardening_legacy.py -q
+      - name: Build and smoke-test the actual Docker runtime
+        run: |
+          docker build -t nyc-housing-hosted-test .
+          docker run --rm -e APP_ENV=test -e DATABASE_URL=sqlite+pysqlite:///:memory: nyc-housing-hosted-test python -c "from app.main import app; assert app.title"
+
   bootstrap:
     name: Fresh launcher / ${{ matrix.os }}
     strategy:
@@ -97,20 +127,31 @@ jobs:
         run: |
           $tempRoot = Join-Path $env:RUNNER_TEMP "wheel-smoke"
           uv venv --python 3.12 "$tempRoot\venv"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $wheel = Get-ChildItem dist\*.whl | Select-Object -First 1
           uv pip install --python "$tempRoot\venv" $wheel.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $workspace = Join-Path $tempRoot "Space ü\workspace"
           & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace setup --no-browser --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace migrate preflight --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace status --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace maintenance prune --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$tempRoot\venv\Scripts\nyc-housing.exe" --data-dir $workspace maintenance prune --apply --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv venv --python 3.12 "$tempRoot\sdist-venv"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $sdist = Get-ChildItem dist\*.tar.gz | Select-Object -First 1
           uv pip install --python "$tempRoot\sdist-venv" $sdist.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $sourceWorkspace = Join-Path $tempRoot "Source ü\workspace"
           & "$tempRoot\sdist-venv\Scripts\nyc-housing.exe" --data-dir $sourceWorkspace setup --skip-core --no-browser --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$tempRoot\sdist-venv\Scripts\nyc-housing.exe" --data-dir $sourceWorkspace migrate preflight --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         if: runner.os == 'Windows'
 
   benchmark:

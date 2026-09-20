@@ -193,6 +193,16 @@ class LocalAnswerService:
         evidence = _evidence(retrieval.results)
         if on_evidence:
             on_evidence(evidence, retrieval.generation_id)
+        # Consent can change while retrieval or an evidence callback is running.
+        with self._storage.corpus_engine.connect() as connection:
+            permitted = set(
+                connection.scalars(
+                    select(source_modules.c.slug).where(
+                        source_modules.c.model_use_allowed.is_(True)
+                    )
+                )
+            )
+        evidence = tuple(item for item in evidence if item.source_slug in permitted)
         answer_profile = get_configured_profile(
             self._context.settings, ProfileKind.ANSWER
         )

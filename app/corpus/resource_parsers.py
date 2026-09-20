@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import stat
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
@@ -246,7 +246,7 @@ def _parse_docx(content: bytes, *, title: str) -> ParsedResource:
     if "word/comments.xml" in members:
         warnings.append("DOCX comments were present and excluded from extraction.")
     total_characters = 0
-    for element in body:
+    for element in _word_blocks(body, warnings):
         local = _local_name(element.tag)
         if local == "p":
             paragraph_number += 1
@@ -347,13 +347,59 @@ def _parse_docx(content: bytes, *, title: str) -> ParsedResource:
             _check_chunk_limit(chunks)
     if not chunks:
         raise CorpusValidationError("The selected DOCX contains no visible text.")
+    bounded = []
+    for chunk in chunks:
+        if (
+            len(chunk.text) <= MAX_CHUNK_CHARACTERS
+            and len(chunk.text.encode("utf-8")) <= 7_500
+        ):
+            bounded.append(
+                replace(
+                    chunk, locator=chunk.locator | {"chunk_ordinal": len(bounded) + 1}
+                )
+            )
+            continue
+        parts = _chunk_text(
+            chunk.text,
+            title=chunk.title,
+            locator_base=chunk.locator,
+            starting_ordinal=len(bounded),
+        )
+        offset = 0
+        for number, part in enumerate(parts, 1):
+            start = chunk.text.find(part.text, offset)
+            offset = start + len(part.text)
+            bounded.append(
+                replace(
+                    part,
+                    stable_id=f"{chunk.stable_id}-part-{number}",
+                    locator=part.locator
+                    | {"character_start": start, "character_end": offset},
+                )
+            )
+    _check_chunk_limit(bounded)
     return ParsedResource(
         media_type=DOCX_MEDIA_TYPE,
-        chunks=tuple(chunks),
+        chunks=tuple(bounded),
         page_count=None,
         extracted_characters=total_characters,
         warnings=tuple(dict.fromkeys(warnings)),
     )
+
+
+def _word_blocks(element, warnings):
+    """Traverse final-view OOXML block containers without duplicating tables."""
+    for child in element:
+        name = _local_name(child.tag)
+        if name in {"p", "tbl"}:
+            yield child
+        elif name in {"sdt", "sdtContent", "customXml", "ins", "moveTo"}:
+            yield from _word_blocks(child, warnings)
+        elif name not in {"del", "moveFrom", "sectPr", "sdtPr", "sdtEndPr"}:
+            if _visible_word_text(child).strip():
+                warnings.append(
+                    f"Unsupported DOCX block {name!r} contained omitted text."
+                )
 
 
 def _validated_docx_members(content: bytes) -> tuple[dict[str, bytes], list[str]]:
@@ -515,11 +561,17 @@ def _chunk_text(
     paragraphs = [part.strip() for part in re.split(r"\n+", text) if part.strip()]
     pieces: list[tuple[str, int, int]] = []
     for paragraph_number, paragraph in enumerate(paragraphs, start=1):
-        if len(paragraph) <= MAX_CHUNK_CHARACTERS:
+        if (
+            len(paragraph) <= MAX_CHUNK_CHARACTERS
+            and len(paragraph.encode("utf-8")) <= 7_500
+        ):
             pieces.append((paragraph, paragraph_number, paragraph_number))
             continue
-        for offset in range(0, len(paragraph), TARGET_CHUNK_CHARACTERS):
-            piece = paragraph[offset : offset + TARGET_CHUNK_CHARACTERS].strip()
+        # At most four UTF-8 bytes per character: this also bounds embeddings
+        # for multilingual text without depending on a particular tokenizer.
+        width = min(TARGET_CHUNK_CHARACTERS, 7_500 // 4)
+        for offset in range(0, len(paragraph), width):
+            piece = paragraph[offset : offset + width].strip()
             if piece:
                 pieces.append((piece, paragraph_number, paragraph_number))
 
@@ -530,7 +582,10 @@ def _chunk_text(
     end = 0
     for piece, paragraph_start, paragraph_end in pieces:
         addition = len(piece) + (1 if current else 0)
-        if current and current_length + addition > TARGET_CHUNK_CHARACTERS:
+        if current and (
+            current_length + addition > TARGET_CHUNK_CHARACTERS
+            or len(("\n".join(current) + "\n" + piece).encode("utf-8")) > 7_500
+        ):
             grouped.append(("\n".join(current), start, end))
             current = []
             current_length = 0

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 
 from app.maintenance.backup import WorkspaceBackupService
+from app.maintenance.barrier import MaintenanceBarrier
 from app.storage.database import (
     LocalStorage,
     SchemaVersionError,
@@ -49,6 +50,8 @@ def migration_preflight(context: WorkspaceContext) -> dict[str, object]:
         {"corpus": 1, "state": 1},
         {"corpus": 1, "state": 2},
         {"corpus": 2, "state": 1},
+        {"corpus": 2, "state": 2},
+        {"corpus": 3, "state": 1},
     )
     if compatible:
         next_action = "No local schema migration is required."
@@ -78,6 +81,13 @@ def migration_preflight(context: WorkspaceContext) -> dict[str, object]:
 
 
 def migrate_workspace(context: WorkspaceContext) -> MigrationResult:
+    from app.launcher import workspace_launch_lock
+
+    with workspace_launch_lock(context.paths.root):
+        return _migrate_workspace_locked(context)
+
+
+def _migrate_workspace_locked(context: WorkspaceContext) -> MigrationResult:
     if not context.initialized:
         raise SchemaVersionError("Workspace is not initialized; run setup first.")
     storage = LocalStorage.open(context.paths)
@@ -92,6 +102,8 @@ def migrate_workspace(context: WorkspaceContext) -> MigrationResult:
             {"corpus": 1, "state": 1},
             {"corpus": 1, "state": 2},
             {"corpus": 2, "state": 1},
+            {"corpus": 2, "state": 2},
+            {"corpus": 3, "state": 1},
         ):
             raise SchemaVersionError(
                 f"No migration is available for schema versions {versions}."
@@ -103,12 +115,19 @@ def migrate_workspace(context: WorkspaceContext) -> MigrationResult:
             f"pre-migration-c{from_corpus}-s{from_state}-{timestamp}.zip"
         )
         WorkspaceBackupService(storage).create(backup_path)
-        if from_corpus == 1:
-            _migrate_corpus_v1_to_v2(storage)
-        if from_state == 1:
-            _migrate_state_v1_to_v2(storage)
-        _write_workspace_manifest(context.paths)
-        storage.assert_compatible()
+        barrier = MaintenanceBarrier(storage.state_engine)
+        barrier.enter("migration", datetime.now(UTC))
+        try:
+            if from_corpus == 1:
+                _migrate_corpus_v1_to_v2(storage)
+            if from_corpus <= 2:
+                _migrate_corpus_v2_to_v3(storage)
+            if from_state == 1:
+                _migrate_state_v1_to_v2(storage)
+            _write_workspace_manifest(context.paths)
+            storage.assert_compatible()
+        finally:
+            barrier.leave()
         return MigrationResult(
             status="migrated",
             from_corpus_version=from_corpus,
@@ -188,4 +207,21 @@ def _migrate_state_v1_to_v2(storage: LocalStorage) -> None:
         )
         connection.execute(
             text("UPDATE schema_metadata SET value = '2' WHERE key = 'version'")
+        )
+
+
+def _migrate_corpus_v2_to_v3(storage: LocalStorage) -> None:
+    from app.corpus.service import CorpusService
+
+    with storage.corpus_engine.begin() as connection:
+        current = connection.scalar(
+            text("SELECT value FROM schema_metadata WHERE key = 'version'")
+        )
+        if current != "2":
+            raise SchemaVersionError(
+                f"Corpus migration expected version 2, found {current!r}."
+            )
+        CorpusService(storage)._build_fts(connection, "")
+        connection.execute(
+            text("UPDATE schema_metadata SET value = '3' WHERE key = 'version'")
         )

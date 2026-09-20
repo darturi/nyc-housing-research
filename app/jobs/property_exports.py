@@ -34,7 +34,7 @@ class PropertyExportJobs:
         *,
         connector_factory=None,
     ) -> None:
-        self._context = context
+        self._base_context = context
         self._jobs = JobService(storage.state_engine)
         self._jobs.recover_interrupted()
         self._connector_factory = connector_factory
@@ -44,6 +44,10 @@ class PropertyExportJobs:
         )
         self._futures: dict[str, Future] = {}
         self._lock = threading.Lock()
+
+    @property
+    def _context(self) -> WorkspaceContext:
+        return self._base_context.current()
 
     def submit(
         self,

@@ -185,6 +185,8 @@ def check_daily_token_budget(
         )
         or 0
     )
+    outstanding = _outstanding_answer_reservations(db, day_start, user_id=user_id)
+    used += sum(int(row.event_metadata.get("tokens", 0)) for row in outstanding)
     remaining = max(0, budget - int(used))
     reset_at = day_start + timedelta(days=1)
     retry_after_seconds = max(1, int((reset_at - now).total_seconds()))
@@ -228,8 +230,10 @@ def check_monthly_llm_cost_budget(db: DbSession) -> RateLimitDecision:
             AnswerLog.llm_provider != "fake",
         )
     ).all()
-    used = sum(
-        answer_cost_microdollars(row[0] or 0, row[1] or 0) for row in rows
+    used = sum(answer_cost_microdollars(row[0] or 0, row[1] or 0) for row in rows)
+    used += sum(
+        int(row.event_metadata.get("microdollars", 0))
+        for row in _outstanding_answer_reservations(db, month_start)
     )
     requested = estimate_answer_cost_microdollars()
     budget = int(round(settings.monthly_llm_cost_budget_usd * 1_000_000))
@@ -246,6 +250,58 @@ def check_monthly_llm_cost_budget(db: DbSession) -> RateLimitDecision:
         retry_after_seconds=max(1, int((reset_at - now).total_seconds())),
         reason="monthly_llm_cost_budget",
     )
+
+
+def lock_answer_admission(db: DbSession) -> None:
+    """Serialize checking and reserving, never the provider's network request."""
+    if db.bind is not None and db.bind.dialect.name == "sqlite":
+        connection = db.connection()
+        if not connection.connection.driver_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+    else:
+        _lock_rate_limit_key(db, "global", "llm_cost", "monthly")
+
+
+def reserve_answer_usage(db: DbSession, user_id: str, tokens: int) -> RateLimitEvent:
+    event = RateLimitEvent(
+        scope="user",
+        key=user_id,
+        user_id=user_id,
+        event_type="answer_cost_reserved",
+        endpoint="/answer",
+        event_metadata={
+            "tokens": tokens,
+            "microdollars": estimate_answer_cost_microdollars(),
+        },
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def finish_answer_usage(
+    db: DbSession, reservation_id: str | None, *, completed: bool
+) -> None:
+    if reservation_id is None:
+        return
+    event = db.get(RateLimitEvent, reservation_id)
+    if event is not None:
+        event.event_type = (
+            "answer_cost_settled" if completed else "answer_cost_uncertain"
+        )
+        db.commit()
+
+
+def _outstanding_answer_reservations(db, since, *, user_id=None):
+    statement = select(RateLimitEvent).where(
+        RateLimitEvent.event_type.in_(
+            ["answer_cost_reserved", "answer_cost_uncertain"]
+        ),
+        RateLimitEvent.created_at >= since,
+    )
+    if user_id is not None:
+        statement = statement.where(RateLimitEvent.user_id == user_id)
+    return list(db.scalars(statement))
 
 
 def get_user_quota(db: DbSession, user_id: str) -> UserQuota | None:
@@ -288,7 +344,12 @@ def prune_old_events(db: DbSession, retention_days: int | None = None) -> int:
     days = retention_days or settings.rate_limit_event_retention_days
     cutoff = utc_now() - timedelta(days=days)
     result = db.execute(
-        delete(RateLimitEvent).where(RateLimitEvent.created_at < cutoff)
+        delete(RateLimitEvent).where(
+            RateLimitEvent.created_at < cutoff,
+            RateLimitEvent.event_type.not_in(
+                ["answer_cost_reserved", "answer_cost_uncertain"]
+            ),
+        )
     )
     db.commit()
     return result.rowcount or 0

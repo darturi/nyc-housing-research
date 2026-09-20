@@ -49,6 +49,12 @@ profile.
   `setup --answer-deadline-seconds N` can select 5–300 seconds.
 - Every request reserves projected spend before sending, then appends a settlement
   from provider usage. A lost response remains conservatively “uncertain.”
+- Admission reserves one input token per UTF-8 byte, plus answer framing, and the
+  configured output maximum. This conservative bound may reject inputs that an
+  exact tokenizer could accept. Profile input limits are checked before dispatch.
+- An explicitly approved operation ceiling applies to all batches and resumed
+  attempts, together with the current workspace caps. Settings changes apply to
+  new requests immediately; requests already sent cannot be recalled.
 - Corpus embedding is never automatic. `--estimate-only`, `--approve-cost`, and
   a required `--max-cost-usd` make paid bulk spend deliberate.
 - Reused chunk/profile embeddings are not purchased again.
@@ -58,6 +64,20 @@ profile.
 Change budgets in Settings or during setup; values are exact decimals. The local
 ledger accounts only for this installation. Other software using the same API key
 is outside its cap, so the provider dashboard remains authoritative.
+Reservations use the configured profile prices and supported tokenization
+assumptions; they cannot guarantee the bill from an arbitrary custom endpoint.
+
+After a provider process stops, its unfinished reservations become uncertain
+without erasing the possible charge. Run `usage --attempts --json` to list attempt
+IDs. After checking the provider's receipt, reconcile an attempt explicitly:
+
+```bash
+uv run nyc-housing usage --reconcile ATTEMPT_ID --actual-usd 0.25 --reason "Verified provider receipt" --json
+```
+
+Corrections append to the audit trail. Use zero only when the absence of a charge
+has been verified. Uncertain amounts, including those from earlier months,
+continue to count against available budget until reconciled.
 
 Completed attempts default to 12 calendar months of retention, independently of
 the 30-day job/log policy. Retention cleanup never removes unresolved reservations

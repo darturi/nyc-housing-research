@@ -234,20 +234,29 @@ class HpdSocrataConnector:
                 )
             where = f"({where}) AND buildingid = {_literal(candidates[0].building_id)}"
         cursor = _decode_continuation(query) if query.continuation else None
+        null_partition = cursor is not None and cursor["inspection_date"] is None
         if cursor:
-            cursor_filter = (
-                f"(inspectiondate < {_literal(cursor['inspection_date'])} OR "
-                f"(inspectiondate = {_literal(cursor['inspection_date'])} AND "
-                f"violationid > {_literal(cursor['violation_id'])}))"
-            )
+            if null_partition:
+                cursor_filter = f"violationid > {_literal(cursor['violation_id'])}"
+            else:
+                cursor_filter = (
+                    f"(inspectiondate < {_literal(cursor['inspection_date'])} OR "
+                    f"(inspectiondate = {_literal(cursor['inspection_date'])} AND "
+                    f"violationid > {_literal(cursor['violation_id'])}))"
+                )
             where = (
                 f"({where}) AND buildingid = {_literal(cursor['building_id'])} "
                 f"AND {cursor_filter}"
             )
         params = {
             "$select": ",".join(self.manifest["fields"]),
-            "$where": f"({where}) AND inspectiondate is not null",
-            "$order": "inspectiondate DESC,violationid ASC",
+            "$where": (
+                f"({where}) AND inspectiondate is "
+                f"{'null' if null_partition else 'not null'}"
+            ),
+            "$order": "violationid ASC"
+            if null_partition
+            else "inspectiondate DESC,violationid ASC",
             "$limit": str(query.limit + 1),
         }
         response = self._request(endpoint, params, headers, deadline)
@@ -257,6 +266,37 @@ class HpdSocrataConnector:
             raise PropertyConnectorError("HPD returned invalid JSON.") from exc
         if not isinstance(rows, list):
             raise PropertyConnectorError("HPD response was not a row list.")
+        if (
+            not null_partition
+            and len(rows) <= query.limit
+            and not query.inspection_date_from
+            and not query.inspection_date_to
+        ):
+            # Dates sort separately so nulls neither disappear nor require a
+            # publisher-specific NULLS LAST ordering extension.
+            null_where = _where_clause(query)
+            building_id = (
+                cursor["building_id"]
+                if cursor
+                else (query.building_id or candidates[0].building_id)
+            )
+            null_params = {
+                "$select": params["$select"],
+                "$where": (
+                    f"({null_where}) AND buildingid = {_literal(building_id)} "
+                    "AND inspectiondate is null"
+                ),
+                "$order": "violationid ASC",
+                "$limit": str(query.limit + 1 - len(rows)),
+            }
+            null_response = self._request(endpoint, null_params, headers, deadline)
+            try:
+                null_rows = null_response.json()
+            except ValueError as exc:
+                raise PropertyConnectorError("HPD returned invalid JSON.") from exc
+            if not isinstance(null_rows, list):
+                raise PropertyConnectorError("HPD response was not a row list.")
+            rows.extend(null_rows)
         records = tuple(_record(row) for row in rows[: query.limit])
         candidates = _candidates(records)
         requires_selection = not query.building_id and len(candidates) > 1
@@ -531,7 +571,11 @@ def _decode_continuation(query: PropertyQuery) -> dict:
         not isinstance(payload, dict)
         or payload.get("request_hash") != _request_hash(query)
         or not str(payload.get("building_id", "")).isdigit()
-        or not payload.get("inspection_date")
+        or "inspection_date" not in payload
+        or (
+            payload["inspection_date"] is not None
+            and not isinstance(payload["inspection_date"], str)
+        )
         or not str(payload.get("violation_id", "")).isdigit()
     ):
         raise ValueError("Property continuation does not match this request.")

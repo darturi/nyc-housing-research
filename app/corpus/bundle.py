@@ -135,9 +135,13 @@ class CanonicalBundleService:
                         allow_partial=allow_partial,
                         activate=True,
                     )
-                    merged = connection.execute(
-                        select(generations).where(generations.c.id == merged_id)
-                    ).mappings().one()
+                    merged = (
+                        connection.execute(
+                            select(generations).where(generations.c.id == merged_id)
+                        )
+                        .mappings()
+                        .one()
+                    )
                     summary = BundleSummary(
                         generation_id=merged_id,
                         source_count=len(selected),
@@ -145,9 +149,7 @@ class CanonicalBundleService:
                             connection.scalar(
                                 select(func.count())
                                 .select_from(generation_chunks)
-                                .where(
-                                    generation_chunks.c.generation_id == merged_id
-                                )
+                                .where(generation_chunks.c.generation_id == merged_id)
                             )
                             or 0
                         ),
@@ -519,11 +521,7 @@ def _insert_records(connection, payload: dict, artifact_uris: dict[str, str]) ->
             )
             if existing is None:
                 connection.execute(insert(table).values(**row))
-            elif any(
-                existing[key] != value
-                for key, value in row.items()
-                if key != "last_checked_at"
-            ):
+            elif not _same_record(table, existing, row):
                 raise CorpusValidationError(
                     f"Bundle record conflicts with local {table.name}: {row['id']}"
                 )
@@ -540,8 +538,46 @@ def _insert_records(connection, payload: dict, artifact_uris: dict[str, str]) ->
         row = dict(original)
         row["vector_bytes"] = base64.b64decode(row.pop("vector_base64"), validate=True)
         _parse_datetimes(embeddings, row)
-        connection.execute(insert(embeddings).values(**row))
+        existing = (
+            connection.execute(
+                select(embeddings).where(
+                    embeddings.c.chunk_id == row["chunk_id"],
+                    embeddings.c.profile_id == row["profile_id"],
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if existing is None:
+            connection.execute(insert(embeddings).values(**row))
+        elif not _same_record(embeddings, existing, row):
+            raise CorpusValidationError(
+                "Bundle embedding conflicts with a local vector."
+            )
     connection.execute(delete(corpus_state).where(corpus_state.c.id != 1))
+
+
+def _same_record(table, existing, incoming) -> bool:
+    ignored = {"last_checked_at", "created_at"}
+    if table is source_versions:
+        ignored |= {"artifact_uri", "retrieved_at", "provenance_json"}
+    if table is source_modules:
+        ignored |= {"model_use_allowed", "enabled"}
+    if table is embeddings:
+        ignored.add("id")
+
+    def canonical(value):
+        if isinstance(value, datetime):
+            return (
+                value.replace(tzinfo=UTC) if value.tzinfo is None else value
+            ).astimezone(UTC)
+        return value
+
+    return all(
+        canonical(existing[key]) == canonical(value)
+        for key, value in incoming.items()
+        if key not in ignored
+    )
 
 
 def _parse_datetimes(table, row: dict) -> None:

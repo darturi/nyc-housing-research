@@ -14,6 +14,7 @@ from app.corpus.service import CorpusService, CorpusValidationError
 from app.jobs.runtime import CancellationSignal, Deadline
 from app.providers.gateway import ProviderGateway
 from app.providers.profiles import ProfileKind, ProviderProfile
+from app.providers.tokens import input_token_bound
 from app.storage.database import LocalStorage
 from app.storage.schema import (
     chunks,
@@ -86,9 +87,7 @@ class CorpusEmbeddingIndexer:
                 )
             )
         missing = [row for row in chunk_rows if row["id"] not in reusable]
-        tokens = sum(
-            max(1, (len(row["text"].encode("utf-8")) + 3) // 4) for row in missing
-        )
+        tokens = sum(input_token_bound(row["text"]) for row in missing)
         if profile.input_usd_per_million is None:
             raise CorpusValidationError(
                 "The selected embedding profile has no verified price."

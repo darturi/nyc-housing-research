@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 
-CORPUS_SCHEMA_VERSION = 2
+CORPUS_SCHEMA_VERSION = 3
 STATE_SCHEMA_VERSION = 2
 
 corpus_metadata = MetaData()

@@ -134,7 +134,7 @@ def test_incompatible_schema_is_rejected_before_settings_are_written(context):
         connection.execute(update(state_schema_metadata).values(value="99"))
     storage.close()
     original = context.paths.config_file.read_bytes()
-    with pytest.raises(SchemaVersionError, match="different application version"):
+    with pytest.raises(SchemaVersionError, match="migrate preflight"):
         prepare_workspace(context)
     assert context.paths.config_file.read_bytes() == original
     storage = LocalStorage.open(context.paths)

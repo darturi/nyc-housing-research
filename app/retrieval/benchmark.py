@@ -273,7 +273,7 @@ def _populate(
                 fts_rows.append(
                     {
                         "chunk_id": chunk_id,
-                        "generation_id": "benchmark-generation",
+                        "generation_id": "__shared__",
                         "title": f"Benchmark {index}",
                         "citation": f"BENCH § {index}",
                         "body": body,

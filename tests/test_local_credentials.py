@@ -117,7 +117,7 @@ def test_provider_profiles_are_kind_and_price_versioned() -> None:
     assert answer.stores_response is False
     assert answer.request_timeout_seconds == 60
     assert answer.max_attempts == 1
-    assert answer.token_estimator == "utf8_bytes_div_4_conservative"
+    assert answer.token_estimator == "utf8_bytes_upper_bound_v1"
     assert embedding.dimension == 1536
 
 

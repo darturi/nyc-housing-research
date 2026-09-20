@@ -89,7 +89,7 @@ class LocalSessionService:
             if consumed.rowcount != 1:
                 raise LocalSessionError("Invalid or expired launch credential.")
             session_token = secrets.token_urlsafe(32)
-            csrf_token = secrets.token_urlsafe(32)
+            csrf_token = _csrf_token(session_token)
             expires_at = now + timedelta(hours=SESSION_HOURS)
             connection.execute(
                 insert(local_sessions).values(
@@ -144,7 +144,9 @@ class LocalSessionService:
         if not session_token:
             raise LocalSessionError("Local session authentication required.")
         now = now or _now()
-        token = secrets.token_urlsafe(32)
+        # All tabs share the session cookie. Reconnecting must not revoke the
+        # independently held CSRF tokens of other tabs.
+        token = _csrf_token(session_token)
         with self._storage.state_engine.begin() as connection:
             result = connection.execute(
                 update(local_sessions)
@@ -176,6 +178,12 @@ class LocalSessionService:
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _csrf_token(session_token: str) -> str:
+    return hmac.new(
+        session_token.encode("utf-8"), b"nyc-housing-csrf-v1", hashlib.sha256
+    ).hexdigest()
 
 
 def _now() -> datetime:

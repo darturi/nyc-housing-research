@@ -41,6 +41,8 @@ def test_fresh_cache_avoids_a_second_agency_request(tmp_path) -> None:
     def handler(_request):
         nonlocal calls
         calls += 1
+        if "inspectiondate is null" in _request.url.params["$where"]:
+            return httpx.Response(200, json=[])
         return httpx.Response(200, json=[_row()])
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -54,7 +56,7 @@ def test_fresh_cache_avoids_a_second_agency_request(tmp_path) -> None:
         )
         assert first.cache_status == "live"
         assert second.cache_status == "fresh_cache"
-        assert calls == 1
+        assert calls == 2
     finally:
         client.close()
         storage.close()
@@ -95,6 +97,41 @@ def test_stale_success_is_available_offline_with_original_fetch_date(tmp_path) -
         storage.close()
 
 
+def test_connector_upgrade_does_not_reuse_cache_that_omitted_undated_records(
+    tmp_path,
+) -> None:
+    storage = _storage(tmp_path)
+    query = PropertyQuery(building_id="375411")
+    now = datetime(2026, 9, 14, tzinfo=UTC)
+
+    def handler(request):
+        row = _row("200")
+        row.pop("inspectiondate")
+        return httpx.Response(
+            200,
+            json=[row]
+            if "inspectiondate is null" in request.url.params["$where"]
+            else [],
+        )
+
+    try:
+        with httpx.Client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[]))
+        ) as client:
+            old = HpdSocrataConnector(NetworkPolicy(False), client=client)
+            old.manifest["connector_version"] = "hpd-soda21-v2"
+            original = CachedPropertyRepository(storage, old).search(query, now=now)
+            assert original.source_status == "verified_zero"
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            current = HpdSocrataConnector(NetworkPolicy(False), client=client)
+            response = CachedPropertyRepository(storage, current).search(query, now=now)
+        assert response.cache_status == "live"
+        assert response.returned_count == 1
+        assert response.records[0].violation_id == "200"
+    finally:
+        storage.close()
+
+
 def test_verified_empty_expires_quickly_and_is_not_stale_fallback(tmp_path) -> None:
     storage = _storage(tmp_path)
     now = datetime(2026, 9, 14, tzinfo=UTC)
@@ -129,6 +166,8 @@ def test_filter_and_pagination_identity_do_not_share_cache(tmp_path) -> None:
     def handler(_request):
         nonlocal calls
         calls += 1
+        if "inspectiondate is null" in _request.url.params["$where"]:
+            return httpx.Response(200, json=[])
         return httpx.Response(200, json=[_row(str(calls))])
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -137,7 +176,7 @@ def test_filter_and_pagination_identity_do_not_share_cache(tmp_path) -> None:
     try:
         repository.search(PropertyQuery(building_id="1", status="open"))
         repository.search(PropertyQuery(building_id="1", status="closed"))
-        assert calls == 2
+        assert calls == 4
         with storage.state_engine.connect() as connection:
             assert (
                 connection.scalar(select(func.count()).select_from(property_cache)) == 2

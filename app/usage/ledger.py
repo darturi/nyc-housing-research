@@ -10,8 +10,10 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, insert, select
 
+from app.maintenance.barrier import maintenance_active
 from app.storage.database import LocalStorage
-from app.storage.schema import maintenance_state, paid_call_leases, usage_events
+from app.storage.schema import paid_call_leases, usage_events
+from app.workspace.locks import owner_alive, process_owner
 
 ZERO = Decimal("0")
 
@@ -81,14 +83,17 @@ class UsageLedger:
             raise ValueError("Projected spend cannot be negative.")
         if not cost_known and projected_usd != ZERO:
             raise ValueError("Unknown-cost reservations cannot claim a USD amount.")
-        price_snapshot = {**price_snapshot, "cost_known": cost_known}
+        price_snapshot = {
+            **price_snapshot,
+            "cost_known": cost_known,
+            "process_owner": process_owner(self._storage.state_engine),
+        }
         with _ImmediateTransaction(self._storage.state_engine) as connection:
-            if connection.scalar(
-                select(maintenance_state.c.active).where(maintenance_state.c.id == 1)
-            ):
+            if maintenance_active(connection):
                 raise PaidCapacityUnavailable(
                     "Workspace maintenance is active; paid work was not admitted."
                 )
+            recover_usage_attempts(connection, now)
             events = _event_rows(connection)
             if any(row["attempt_id"] == attempt_id for row in events):
                 raise SpendDenied(
@@ -110,7 +115,7 @@ class UsageLedger:
                     state["amount"]
                     for state in states.values()
                     if _month(_aware(state["reserved_at"]), timezone) != month
-                    and state["status"] == "reserved"
+                    and state["status"] in {"reserved", "uncertain"}
                 ),
                 ZERO,
             )
@@ -134,9 +139,8 @@ class UsageLedger:
                 raise SpendDenied(
                     "The request would exceed the local monthly API budget."
                 )
-            connection.execute(
-                delete(paid_call_leases).where(paid_call_leases.c.expires_at <= now)
-            )
+            # Recovery releases dead owners. A live streaming request can outlast
+            # a wall-clock lease and must still consume a concurrency slot.
             lease_count = len(
                 list(connection.scalars(select(paid_call_leases.c.attempt_id)))
             )
@@ -224,16 +228,16 @@ class UsageLedger:
         now: datetime | None = None,
     ) -> UsageSummary:
         now = now or datetime.now(UTC)
-        with self._storage.state_engine.connect() as connection:
+        with _ImmediateTransaction(self._storage.state_engine) as connection:
+            recover_usage_attempts(connection, now)
             states = _attempt_states(_event_rows(connection))
         month = _month(now, timezone)
         amounts = {"reserved": ZERO, "settled": ZERO, "uncertain": ZERO}
         unknown = {"reserved": 0, "settled": 0, "uncertain": 0}
         for state in states.values():
-            if (
-                _month(_aware(state["reserved_at"]), timezone) == month
-                or state["status"] == "reserved"
-            ):
+            if _month(_aware(state["reserved_at"]), timezone) == month or state[
+                "status"
+            ] in {"reserved", "uncertain"}:
                 status = state["status"]
                 if status in amounts:
                     amounts[status] += state["amount"]
@@ -274,8 +278,11 @@ class UsageLedger:
         """Append an explicit reconciliation without rewriting ledger history."""
         if not reason.strip() or len(reason) > 500:
             raise ValueError("A bounded correction reason is required.")
+        if not actual_usd.is_finite() or actual_usd < 0:
+            raise ValueError("Actual cost must be finite and nonnegative.")
         now = now or datetime.now(UTC)
         with _ImmediateTransaction(self._storage.state_engine) as connection:
+            recover_usage_attempts(connection, now)
             rows = _event_rows(connection)
             states = _attempt_states(rows)
             state = states.get(attempt_id)
@@ -308,6 +315,32 @@ class UsageLedger:
                     created_at=now,
                 )
             )
+
+    def recover_interrupted(self, *, now: datetime | None = None) -> int:
+        with _ImmediateTransaction(self._storage.state_engine) as connection:
+            return recover_usage_attempts(connection, now or datetime.now(UTC))
+
+    def unresolved_attempts(self) -> list[dict[str, object]]:
+        """List outstanding charges so an operator can reconcile by attempt ID."""
+        with _ImmediateTransaction(self._storage.state_engine) as connection:
+            recover_usage_attempts(connection, datetime.now(UTC))
+            events = _event_rows(connection)
+            states = _attempt_states(events)
+        return [
+            {
+                "attempt_id": row["attempt_id"],
+                "operation_id": row["operation_id"],
+                "provider": row["provider"],
+                "profile_id": row["profile_id"],
+                "status": states[row["attempt_id"]]["status"],
+                "amount_usd": str(states[row["attempt_id"]]["amount"]),
+                "cost_known": states[row["attempt_id"]]["cost_known"],
+                "reserved_at": _aware(row["created_at"]).isoformat(),
+            }
+            for row in events
+            if row["event_type"] == "reserve"
+            and states[row["attempt_id"]]["status"] in {"reserved", "uncertain"}
+        ]
 
     def _finish(
         self,
@@ -353,6 +386,46 @@ class UsageLedger:
                     paid_call_leases.c.attempt_id == reservation.attempt_id
                 )
             )
+
+
+def recover_usage_attempts(connection, now: datetime) -> int:
+    events = _event_rows(connection)
+    states = _attempt_states(events)
+    leases = {
+        row.attempt_id: _aware(row.expires_at)
+        for row in connection.execute(select(paid_call_leases))
+    }
+    recovered = 0
+    for row in events:
+        attempt_id = row["attempt_id"]
+        if row["event_type"] != "reserve" or states[attempt_id]["status"] != "reserved":
+            continue
+        snapshot = json.loads(row["price_snapshot_json"])
+        alive = owner_alive(connection.engine, snapshot.get("process_owner"))
+        if alive is True or (alive is None and leases.get(attempt_id, now) > now):
+            continue
+        snapshot["recovery_reason"] = "Provider process stopped before settlement."
+        connection.execute(
+            insert(usage_events).values(
+                id=str(uuid.uuid4()),
+                operation_id=row["operation_id"],
+                attempt_id=attempt_id,
+                event_type="uncertain",
+                provider=row["provider"],
+                profile_id=row["profile_id"],
+                amount_usd=row["amount_usd"],
+                input_tokens=None,
+                output_tokens=None,
+                price_snapshot_json=json.dumps(snapshot, sort_keys=True),
+                status="uncertain",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            delete(paid_call_leases).where(paid_call_leases.c.attempt_id == attempt_id)
+        )
+        recovered += 1
+    return recovered
 
 
 def _event_rows(connection) -> list[dict]:

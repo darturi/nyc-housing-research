@@ -58,3 +58,6 @@ docs/scratch
 
 # Local feature specifications
 /docs/feature-specifications/
+
+# Local manual feature-testing guides
+/docs/feature-test-guides/

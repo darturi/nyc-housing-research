@@ -414,7 +414,11 @@ class CorpusService:
             )
             fts_count = int(
                 connection.scalar(
-                    text("SELECT count(*) FROM chunk_fts WHERE generation_id = :id"),
+                    text(
+                        "SELECT count(*) FROM chunk_fts f JOIN generation_chunks gc "
+                        "ON gc.chunk_id = f.chunk_id WHERE gc.generation_id = :id "
+                        "AND f.generation_id = '__shared__'"
+                    ),
                     {"id": selected},
                 )
                 or 0
@@ -1009,43 +1013,21 @@ class CorpusService:
                 path.unlink(missing_ok=True)
 
     def _build_fts(self, connection, generation_id: str) -> None:
+        # Corpus schema 3 indexes each immutable chunk once. Generation
+        # membership is joined at query time, including historical searches.
         connection.execute(
-            text("DELETE FROM chunk_fts WHERE generation_id = :generation_id"),
-            {"generation_id": generation_id},
+            text("DELETE FROM chunk_fts WHERE generation_id <> '__shared__'")
         )
-        rows = connection.execute(
-            select(
-                chunks.c.id,
-                chunks.c.title,
-                chunks.c.citation,
-                chunks.c.text,
-            )
-            .select_from(
-                generation_chunks.join(
-                    chunks, chunks.c.id == generation_chunks.c.chunk_id
-                )
-            )
-            .where(generation_chunks.c.generation_id == generation_id)
+        connection.execute(
+            text("""
+            INSERT INTO chunk_fts (chunk_id, generation_id, title, citation, body)
+            SELECT c.id, '__shared__', coalesce(c.title, ''),
+                   coalesce(c.citation, ''), c.text
+            FROM chunks c
+            WHERE c.id IN (SELECT chunk_id FROM generation_chunks)
+              AND c.id NOT IN (SELECT chunk_id FROM chunk_fts)
+        """)
         )
-        parameters = [
-            {
-                "chunk_id": row.id,
-                "generation_id": generation_id,
-                "title": row.title or "",
-                "citation": row.citation or "",
-                "body": row.text,
-            }
-            for row in rows
-        ]
-        if parameters:
-            connection.execute(
-                text(
-                    "INSERT INTO chunk_fts "
-                    "(chunk_id, generation_id, title, citation, body) "
-                    "VALUES (:chunk_id, :generation_id, :title, :citation, :body)"
-                ),
-                parameters,
-            )
 
     def _activate_in_transaction(
         self, connection, generation_id: str, now: datetime

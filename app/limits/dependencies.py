@@ -11,7 +11,9 @@ from app.limits.service import (
     check_window_limit,
     client_ip_from_request,
     estimate_answer_tokens,
+    lock_answer_admission,
     record_event,
+    reserve_answer_usage,
     search_limit_for_user,
     token_budget_for_user,
     user_is_exempt,
@@ -95,10 +97,11 @@ def enforce_answer_limit(
     request: Request,
     db: DbSession,
     current_user: User,
-) -> None:
+) -> str | None:
     settings = get_settings()
     if not settings.rate_limit_enabled:
         return
+    lock_answer_admission(db)
     if not user_is_exempt(db, current_user.id):
         decision = check_window_limit(
             db,
@@ -138,6 +141,7 @@ def enforce_answer_limit(
         )
         raise rate_limit_exception(monthly_decision)
 
+    reservation = reserve_answer_usage(db, current_user.id, estimate_answer_tokens())
     record_event(
         db,
         "user",
@@ -147,6 +151,7 @@ def enforce_answer_limit(
         user_id=current_user.id,
         ip_address=client_ip_from_request(request),
     )
+    return reservation.id
 
 
 def raise_timeout() -> None:
