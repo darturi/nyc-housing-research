@@ -9,6 +9,8 @@ API key for embeddings and generated answers.
 This is general legal-information software, not legal advice. Verify sources and
 current law before relying on a result.
 
+![NYC Housing Research interface showing cited legal research and property violation lookup](docs/images/nyc-housing-screenshot.png)
+
 ## What works
 
 - Downloads and locally indexes five official legal/guidance modules.
