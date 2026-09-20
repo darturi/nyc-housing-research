@@ -89,7 +89,11 @@ from app.retrieval.benchmark import benchmark_as_dict, run_synthetic_benchmark
 from app.retrieval.evaluation import evaluate_retrieval, load_retrieval_cases
 from app.retrieval.local import LocalSearch, LocalSearchFilters
 from app.storage.database import LocalStorage, SchemaVersionError
-from app.storage.migrations import migrate_workspace, migration_preflight
+from app.storage.migrations import (
+    migrate_workspace,
+    migration_preflight,
+    recover_workspace,
+)
 from app.usage.ledger import PaidCapacityUnavailable, SpendDenied, UsageLedger
 from app.workspace.context import WorkspaceContext, network_policy_for_settings
 from app.workspace.network import NetworkAccessDenied
@@ -645,6 +649,10 @@ def build_parser() -> argparse.ArgumentParser:
         "apply", help="Back up and upgrade a supported older local schema."
     )
     migrate_apply.add_argument("--json", action="store_true")
+    migrate_recover = migrate_commands.add_parser(
+        "recover", help="Recover an interrupted local workspace upgrade."
+    )
+    migrate_recover.add_argument("--json", action="store_true")
     migrate_export = migrate_commands.add_parser(
         "export-legacy",
         help="Export current legal evidence from a legacy database.",
@@ -802,6 +810,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _migration_preflight(context, args)
             if args.migrate_command == "apply":
                 return _migration_apply(context, args)
+            if args.migrate_command == "recover":
+                _write(recover_workspace(context), as_json=args.json)
+                return 0
         if args.command in {"legacy", "migrate"}:
             return _legacy(args)
         if args.command in {"evaluate", "evaluate-retrieval"}:

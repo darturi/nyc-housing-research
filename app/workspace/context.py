@@ -55,6 +55,9 @@ class WorkspaceContext:
         return self.paths.config_file.is_file() and self.paths.root.is_dir()
 
     def initialize(self) -> None:
+        from app.storage.database import assert_no_pending_migration
+
+        assert_no_pending_migration(self.paths)
         self.paths.create()
         save_local_settings(self.paths, self.settings)
 

@@ -137,9 +137,7 @@ def prepare_sources(
         )
         return True
     if context.settings.offline:
-        report(
-            "Offline mode: source downloads skipped. Install sources when online."
-        )
+        report("Offline mode: source downloads skipped. Install sources when online.")
         return True
 
     report(
@@ -232,6 +230,14 @@ def start_workspace(
     if port is not None and not 1 <= port <= 65535:
         raise LocalSettingsError("Port must be between 1 and 65535.")
     with workspace_launch_lock(context.paths.root):
+        from app.storage.migrations import recover_workspace_locked
+
+        recovery = recover_workspace_locked(context)
+        if recovery["status"] != "no_recovery_required":
+            print(
+                "Interrupted upgrade recovered. Checking workspace compatibility…",
+                flush=True,
+            )
         print("[3/4] Preparing your local workspace and source library...", flush=True)
         storage = prepare_workspace(context)
         try:

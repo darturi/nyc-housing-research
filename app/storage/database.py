@@ -19,11 +19,24 @@ from app.storage.schema import (
     state_metadata,
     state_schema_metadata,
 )
+from app.workspace.durable import sync_directory
 from app.workspace.paths import WorkspacePaths
 
 
 class SchemaVersionError(RuntimeError):
     pass
+
+
+class MigrationRecoveryRequired(SchemaVersionError):
+    pass
+
+
+def assert_no_pending_migration(paths: WorkspacePaths) -> None:
+    if (paths.root / ".migration-recovery").exists():
+        raise MigrationRecoveryRequired(
+            "An interrupted workspace upgrade needs recovery. Reopen the desktop "
+            "app or run `nyc-housing migrate recover` before using this workspace."
+        )
 
 
 @dataclass(frozen=True)
@@ -33,7 +46,15 @@ class LocalStorage:
     state_engine: Engine
 
     @classmethod
-    def open(cls, paths: WorkspacePaths, *, initialize: bool = False) -> LocalStorage:
+    def open(
+        cls,
+        paths: WorkspacePaths,
+        *,
+        initialize: bool = False,
+        allow_pending_migration: bool = False,
+    ) -> LocalStorage:
+        if not allow_pending_migration:
+            assert_no_pending_migration(paths)
         if initialize:
             paths.create()
         corpus_engine = _sqlite_engine(paths.corpus_database)
@@ -236,5 +257,6 @@ def _write_workspace_manifest(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, paths.manifest)
+        sync_directory(paths.root)
     finally:
         temporary_path.unlink(missing_ok=True)

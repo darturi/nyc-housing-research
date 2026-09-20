@@ -276,6 +276,7 @@ def test_desktop_offers_separate_copy_if_automatic_recovery_fails(
 
     _fake_services(monkeypatch)
     real_copy = migrations._sqlite_backup
+    real_migrate = migrations._migrate_corpus_v2_to_v3
 
     def copy_except_restore(source, destination):
         if destination == older_workspace.paths.corpus_database:
@@ -284,19 +285,26 @@ def test_desktop_offers_separate_copy_if_automatic_recovery_fails(
 
     monkeypatch.setattr(migrations, "_sqlite_backup", copy_except_restore)
 
-    def fail_migration(_storage):
-        raise RuntimeError("injected upgrade failure")
+    def fail_migration(storage):
+        if storage.paths.root == older_workspace.paths.root:
+            raise RuntimeError("injected upgrade failure")
+        real_migrate(storage)
 
     monkeypatch.setattr(migrations, "_migrate_corpus_v2_to_v3", fail_migration)
     webview = FakeWebview()
-    assert DesktopApplication(older_workspace, webview).run() == 3
+    app = DesktopApplication(older_workspace, webview)
+    assert app.run() == 0
     assert len(webview.windows[0].confirmations) == 2
-    assert "Recovery copy restored" in webview.windows[0].html
     (recovered,) = older_workspace.paths.root.parent.glob("*-recovered-*")
     storage = LocalStorage.open(WorkspaceContext.from_options(recovered).paths)
-    assert storage.versions() == {"corpus": 2, "state": 2}
+    assert storage.versions() == {"corpus": 3, "state": 2}
     storage.close()
-    assert not FakeRuntime.instances
+    assert app.context.paths.root == recovered
+    assert FakeRuntime.instances[0].started
+    assert (older_workspace.paths.root / ".migration-recovery").is_dir()
+    reopened = DesktopApplication(older_workspace, FakeWebview())
+    assert reopened.run() == 0
+    assert reopened.context.paths.root == recovered
 
 
 def test_corrupt_final_backup_blocks_migration(older_workspace, monkeypatch):
@@ -358,3 +366,69 @@ def test_closing_window_keeps_launch_lock_until_upgrade_finishes(
         storage = LocalStorage.open(older_workspace.paths)
         assert storage.versions() == {"corpus": 3, "state": 2}
         storage.close()
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_desktop_detects_interrupted_upgrade_before_starting_service(
+    older_workspace, monkeypatch, accept
+):
+    from tests.test_migration_recovery import crash_upgrade
+
+    crash_upgrade(older_workspace, "before_commit")
+    _fake_services(monkeypatch)
+    webview = FakeWebview()
+    webview.confirm = accept
+    app = DesktopApplication(older_workspace, webview)
+    assert app.run() == 0
+    assert (
+        webview.windows[0].confirmations[0][0]
+        == "Recover interrupted workspace upgrade?"
+    )
+    pending = older_workspace.paths.root / ".migration-recovery"
+    if accept:
+        assert not pending.exists()
+        assert FakeRuntime.instances[0].started
+        assert len(webview.windows[0].confirmations) == 2
+    else:
+        assert pending.exists()
+        assert not FakeRuntime.instances
+        assert "Recovery cancelled" in webview.windows[0].html
+
+
+def test_desktop_opens_backup_copy_when_crash_snapshots_are_damaged(
+    older_workspace, monkeypatch
+):
+    from tests.test_migration_recovery import crash_upgrade
+
+    crash_upgrade(older_workspace, "before_commit")
+    pending = older_workspace.paths.root / ".migration-recovery"
+    (pending / "state.sqlite3").write_bytes(b"damaged")
+    _fake_services(monkeypatch)
+    app = DesktopApplication(older_workspace, FakeWebview())
+    assert app.run() == 0
+    assert app.context.paths.root != older_workspace.paths.root
+    assert pending.exists()
+    assert (older_workspace.paths.root / "desktop-recovery.json").exists()
+    assert FakeRuntime.instances[0].started
+
+
+def test_missing_selected_recovery_never_opens_original_workspace(
+    older_workspace, monkeypatch
+):
+    import json
+
+    _fake_services(monkeypatch)
+    (older_workspace.paths.root / "desktop-recovery.json").write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "workspace": older_workspace.paths.root.name + "-recovered-deadbeef",
+            }
+        )
+    )
+    webview = FakeWebview()
+    assert DesktopApplication(older_workspace, webview).run() == 3
+    assert "selected recovery workspace cannot be opened" in webview.windows[0].html
+    assert not FakeRuntime.instances
+    with workspace_launch_lock(older_workspace.paths.root):
+        pass

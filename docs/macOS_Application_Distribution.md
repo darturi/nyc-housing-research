@@ -84,8 +84,10 @@ backup-and-upgrade confirmation for supported older schemas. Cancelling preserve
 the workspace; ordinary migration failures restore the previous databases.
 Unknown/newer schemas remain blocked. See [Updating](Updating.md) for recovery
 behavior and the separate-copy fallback. Test accept, cancel, failed backup,
-failed migration, and Quit during migration when verifying a desktop build. Corpus/source updates remain independent of
-application updates and continue to use the Sources view.
+failed migration, Quit/forced termination during migration, recovery on next
+launch, and reopening the selected recovery copy when verifying a desktop build.
+Corpus/source updates remain independent of application updates and continue to
+use the Sources view.
 
 ## Shared implementation boundary
 

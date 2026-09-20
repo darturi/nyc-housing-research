@@ -2,6 +2,10 @@
 
 Status: **implemented locally; external release evidence remains open**.
 
+Follow-up: [streaming backups and interrupted-upgrade recovery](2026-09-20_Recovery_Batch.md)
+supersedes this snapshot's backup-memory and crash/recovery-copy limitations.
+The validation results below describe the first batch.
+
 This record supersedes the compatibility and release-status statements in the
 14–15 September snapshots. Those reports remain historical evidence rather than
 instructions for the current checkout.

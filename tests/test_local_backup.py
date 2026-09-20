@@ -122,3 +122,144 @@ def test_backup_refuses_active_jobs(tmp_path) -> None:
             WorkspaceBackupService(storage).create(tmp_path / "blocked.backup")
     finally:
         storage.close()
+
+
+def test_large_backup_roundtrip_uses_bounded_memory(tmp_path, monkeypatch):
+    import hashlib
+    import os
+    import tracemalloc
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    import app.maintenance.backup as backups
+    from app.storage.schema import source_versions
+
+    context, storage = _prepared(tmp_path)
+    with storage.corpus_engine.connect() as connection:
+        relative = connection.scalar(select(source_versions.c.artifact_uri))
+    artifact = context.paths.root / relative
+    block = os.urandom(1024**2)
+    digest = hashlib.sha256()
+    with artifact.open("wb") as handle:
+        for _ in range(24):
+            handle.write(block)
+            digest.update(block)
+    del block
+    original_read_bytes = Path.read_bytes
+
+    def no_whole_files(path):
+        assert path.name == "settings.json", f"Whole-file read: {path}"
+        return original_read_bytes(path)
+
+    def no_zip_read(*args, **kwargs):
+        pytest.fail("Archive members must be streamed")
+
+    monkeypatch.setattr(Path, "read_bytes", no_whole_files)
+    monkeypatch.setattr(zipfile.ZipFile, "read", no_zip_read)
+    archive, restored = tmp_path / "large.zip", tmp_path / "restored-large"
+    tracemalloc.start()
+    try:
+        WorkspaceBackupService(storage).create(archive)
+        backups._read_backup(archive)
+        restore_backup(archive, restored)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+        storage.close()
+    assert peak < 16 * 1024**2, f"Archive-sized allocation: {peak}"
+    with (restored / relative).open("rb") as handle:
+        assert hashlib.file_digest(handle, "sha256").hexdigest() == digest.hexdigest()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "duplicate",
+        "missing_database",
+        "outside_artifact",
+        "unmapped_artifact",
+        "bad_shape",
+    ],
+)
+def test_invalid_backup_structure_never_publishes_restore(tmp_path, damage):
+    _context, storage = _prepared(tmp_path)
+    archive = tmp_path / "source.zip"
+    try:
+        WorkspaceBackupService(storage).create(archive)
+    finally:
+        storage.close()
+    with zipfile.ZipFile(archive) as source:
+        members = {name: source.read(name) for name in source.namelist()}
+    manifest = json.loads(members["backup-manifest.json"])
+    if damage == "missing_database":
+        members.pop("databases/state.sqlite3")
+        manifest["members"].pop("databases/state.sqlite3")
+    elif damage == "outside_artifact":
+        relative = next(iter(manifest["artifact_map"]))
+        manifest["artifact_map"]["artifacts/../../outside"] = manifest[
+            "artifact_map"
+        ].pop(relative)
+    elif damage == "unmapped_artifact":
+        manifest["artifact_map"].clear()
+    elif damage == "bad_shape":
+        manifest = []
+    members["backup-manifest.json"] = json.dumps(manifest).encode()
+    corrupt = tmp_path / "invalid.zip"
+    with zipfile.ZipFile(corrupt, "w") as target:
+        for name, content in members.items():
+            target.writestr(name, content)
+        if damage == "duplicate":
+            with pytest.warns(UserWarning, match="Duplicate"):
+                target.writestr("settings.json", b"{}")
+    destination = tmp_path / "invalid-restore"
+    with pytest.raises(BackupError):
+        restore_backup(corrupt, destination)
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".invalid-restore-restore-*"))
+
+
+def test_backup_write_failure_preserves_previous_archive_and_releases_barrier(
+    tmp_path, monkeypatch
+):
+    from sqlalchemy import text
+
+    import app.maintenance.backup as backups
+
+    _context, storage = _prepared(tmp_path)
+    archive = tmp_path / "existing.zip"
+    archive.write_bytes(b"previous backup")
+
+    def disk_full(source, target, **kwargs):
+        target.write(source.read(128))
+        raise OSError("disk full")
+
+    monkeypatch.setattr(backups, "_copy_and_hash", disk_full)
+    try:
+        with pytest.raises(OSError, match="disk full"):
+            WorkspaceBackupService(storage).create(archive)
+        with storage.state_engine.connect() as connection:
+            assert not connection.scalar(text("SELECT active FROM maintenance_state"))
+        assert archive.read_bytes() == b"previous backup"
+        assert not list(tmp_path.glob(".backup-*.tmp"))
+    finally:
+        storage.close()
+
+
+def test_backup_size_limits_apply_to_creation_and_restore(tmp_path, monkeypatch):
+    import app.maintenance.backup as backups
+
+    _context, storage = _prepared(tmp_path)
+    archive = tmp_path / "valid.zip"
+    try:
+        WorkspaceBackupService(storage).create(archive)
+        monkeypatch.setattr(backups, "MAX_BACKUP_BYTES", archive.stat().st_size + 1)
+        # Compressed archive fits; expanded databases do not.
+        with pytest.raises(BackupError, match="Expanded backup"):
+            restore_backup(archive, tmp_path / "too-large")
+        with pytest.raises(BackupError, match="supported size"):
+            WorkspaceBackupService(storage).create(tmp_path / "new.zip")
+        assert not (tmp_path / "too-large").exists()
+        assert not (tmp_path / "new.zip").exists()
+    finally:
+        storage.close()

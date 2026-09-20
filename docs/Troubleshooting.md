@@ -30,6 +30,13 @@ unfinished free source installation. Read the stage label above any error.
   offers a confirmed backup-and-upgrade flow for supported older schemas. CLI
   users can run `migrate preflight` and, when available, `migrate apply`.
   Unknown/newer schemas are never silently migrated. See [Updating](Updating.md).
+- **Interrupted workspace upgrade:** reopen the desktop and accept recovery, or
+  run `nyc-housing migrate recover` followed by `migrate preflight`. Keep the
+  recovery journal and backup. If local snapshot recovery fails, the desktop can
+  restore, upgrade, and open a separate recovery copy while keeping the original.
+- **Selected recovery workspace is missing:** restore access to the selected
+  folder before launching. The app deliberately stops instead of opening an old
+  original workspace. See [recovery selection](Updating.md#desktop-workspace-upgrade).
 
 For deeper diagnostics in an existing uv environment, start with:
 
@@ -161,7 +168,10 @@ Backup refuses active jobs, pauses new jobs/cache writes/paid calls behind a
 maintenance barrier, takes online SQLite snapshots, sanitizes session state,
 copies referenced immutable artifacts, and hashes every member. Restore requires
 a destination that does not exist and stages/verifies before renaming it into
-place. Corrupt archives leave no partial destination.
+place. Corrupt archives leave no partial destination. Creation, verification,
+and extraction stream content in 1 MiB chunks; the archive limit remains 4 GiB.
+Archives also require a bounded manifest and complete, non-conflicting file maps.
+Allow enough disk space for snapshots, the archive, and the staged restored files.
 
 Credentials must be reconfigured after restore. Default backups exclude property
 cache and all backups exclude exports and in-memory transcripts.

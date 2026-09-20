@@ -73,5 +73,10 @@ upgrade to `(3,2)`. Migration creates and verifies a unique pre-upgrade backup
 under `backups`, adds missing user-resource and saved-research tables/fields,
 and rebuilds the shared full-text index where required. Ordinary migration
 failures restore both previous databases; the backup is retained for recovery.
+New upgrades also persist verified local snapshots and a recovery journal before
+DDL. If preflight reports `recovery_required`, run `nyc-housing migrate recover`
+and preflight again. Recovery either restores both old databases or finishes
+cleanup of a committed upgrade; repeated recovery is safe after another process
+interruption. `migrate apply` performs that recovery before retrying an upgrade.
 Unknown schema versions fail closed. Replacing application code never downgrades
 a workspace, and no schema version should be manually stamped to force startup.

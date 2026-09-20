@@ -48,7 +48,8 @@ application bundles Python and the required dependencies, opens the same interfa
 in a native WebKit window, and uses the same workspace as the browser launcher.
 Users do not need Git, Python, uv, or a terminal. Replacing the application with a
 newer release preserves the workspace under Application Support. Supported older
-workspaces get a native backup-and-upgrade confirmation before startup; see
+workspaces get a native backup-and-upgrade confirmation before startup. Interrupted
+upgrades offer recovery, and recovery copies can be opened directly; see
 [upgrades and recovery](docs/Updating.md#desktop-workspace-upgrade).
 
 The DMG is an additional build of this same codebase, not a separate frontend or

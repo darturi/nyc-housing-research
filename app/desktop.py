@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import html
+import json
 import sys
 import threading
 import uuid
+from contextlib import ExitStack
 from typing import Any
 
 from app.launcher import (
@@ -15,13 +17,19 @@ from app.launcher import (
     workspace_launch_lock,
 )
 from app.maintenance.backup import restore_backup
-from app.storage.database import LocalStorage, SchemaVersionError
+from app.storage.database import (
+    LocalStorage,
+    MigrationRecoveryRequired,
+    SchemaVersionError,
+)
 from app.storage.migrations import (
     MigrationFailure,
     migrate_workspace_locked,
     migration_preflight,
+    recover_workspace_locked,
 )
 from app.workspace.context import WorkspaceContext
+from app.workspace.durable import write_json_atomic
 
 
 class DesktopApplication:
@@ -36,13 +44,18 @@ class DesktopApplication:
         self.application_loaded = False
         self.failed = False
         self._runtime_lock = threading.Lock()
+        self._launch_locks = ExitStack()
+        self._recovery_copy_attempted = False
 
     def run(self) -> int:
         self._configure_webview()
-        launch_lock = workspace_launch_lock(self.context.paths.root)
         try:
-            launch_lock.__enter__()
+            self._launch_locks.enter_context(
+                workspace_launch_lock(self.context.paths.root)
+            )
+            self._select_recovered_workspace()
         except Exception as exc:
+            self._launch_locks.close()
             self.failed = True
             self.window = self.webview.create_window(
                 self.context.settings.app_name,
@@ -88,7 +101,7 @@ class DesktopApplication:
             if self.bootstrap_started.is_set():
                 # Never release workspace ownership while migration is running.
                 self.bootstrap_done.wait()
-            launch_lock.__exit__(None, None, None)
+            self._launch_locks.close()
         return 3 if self.failed else 0
 
     def _configure_webview(self) -> None:
@@ -103,6 +116,10 @@ class DesktopApplication:
         try:
             self._show_status("Preparing your workspace…")
             try:
+                storage = prepare_workspace(self.context)
+            except MigrationRecoveryRequired:
+                if not self._offer_interrupted_recovery(window):
+                    return
                 storage = prepare_workspace(self.context)
             except SchemaVersionError:
                 if not self._offer_upgrade(window):
@@ -186,30 +203,105 @@ class DesktopApplication:
             window.load_html(
                 _error_page("Workspace upgrade could not finish", str(exc))
             )
-            # Ordinary failures already restore the exact pre-upgrade databases.
-            # If that also fails, offer a verified, non-destructive recovery copy.
-            if not exc.recovered and not self.cancelled.is_set():
-                destination = self.context.paths.root.with_name(
-                    f"{self.context.paths.root.name}-recovered-{uuid.uuid4().hex[:8]}"
-                )
-                if window.create_confirmation_dialog(
-                    "Restore a recovery copy?",
-                    "Restore the verified pre-upgrade backup to a separate folder? "
-                    "The current workspace will be kept. The copy needs a release "
-                    "compatible with its old format, or a successful upgrade.\n\n"
-                    f"Recovery folder: {destination}",
-                ):
-                    restore_backup(exc.backup_path, destination)
-                    window.load_html(
-                        _error_page(
-                            "Recovery copy restored",
-                            f"Your pre-upgrade data is in {destination}. "
-                            "The original workspace and backup are preserved. "
-                            "Close this window before opening a compatible release.",
-                        )
-                    )
+            if not exc.recovered:
+                return self._offer_recovery_copy(window, exc)
             return False
         self._show_status(f"Workspace upgraded. Backup saved at {result.backup_path}")
+        return True
+
+    def _select_recovered_workspace(self) -> None:
+        # Keep ownership of both the original and selected workspace until shutdown.
+        for _ in range(8):
+            selection = self.context.paths.root / "desktop-recovery.json"
+            if not selection.exists():
+                return
+            try:
+                if selection.stat().st_size > 4096:
+                    raise ValueError("selection is too large")
+                payload = json.loads(selection.read_text(encoding="utf-8"))
+                name = payload["workspace"]
+                prefix = f"{self.context.paths.root.name}-recovered-"
+                if (
+                    payload.get("format_version") != 1
+                    or not isinstance(name, str)
+                    or not name.startswith(prefix)
+                    or len(name.removeprefix(prefix)) != 8
+                    or any(
+                        c not in "0123456789abcdef" for c in name.removeprefix(prefix)
+                    )
+                ):
+                    raise ValueError("invalid recovery selection")
+                destination = self.context.paths.root.with_name(name)
+                if destination.is_symlink() or not destination.is_dir():
+                    raise ValueError("recovered workspace is missing")
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise SchemaVersionError(
+                    "The selected recovery workspace cannot be opened. "
+                    f"Keep your recovery folders and check {selection}."
+                ) from exc
+            self._launch_locks.enter_context(workspace_launch_lock(destination))
+            self.context = WorkspaceContext.from_options(destination, environment={})
+        raise SchemaVersionError(
+            "Too many linked recovery workspaces; check the folders."
+        )
+
+    def _offer_interrupted_recovery(self, window) -> bool:
+        if self.cancelled.is_set() or not window.create_confirmation_dialog(
+            "Recover interrupted workspace upgrade?",
+            "The last upgrade did not finish closing. Recover the workspace before "
+            "opening it? An unfinished upgrade restores both pre-upgrade databases. "
+            "A completed upgrade keeps the upgraded data. The backup is preserved.",
+        ):
+            self._show_status("Recovery cancelled. Your workspace has been kept.")
+            return False
+        if self.cancelled.is_set():
+            return False
+        self._show_status("Recovering your workspace…")
+        try:
+            recover_workspace_locked(self.context)
+        except MigrationFailure as exc:
+            self.failed = True
+            window.load_html(
+                _error_page("Workspace recovery could not finish", str(exc))
+            )
+            return self._offer_recovery_copy(window, exc)
+        if migration_preflight(self.context)["status"] != "compatible":
+            return self._offer_upgrade(window)
+        return True
+
+    def _offer_recovery_copy(self, window, failure: MigrationFailure) -> bool:
+        if self.cancelled.is_set() or self._recovery_copy_attempted:
+            return False
+        original = self.context
+        destination = original.paths.root.with_name(
+            f"{original.paths.root.name}-recovered-{uuid.uuid4().hex[:8]}"
+        )
+        if (
+            not window.create_confirmation_dialog(
+                "Restore and open a recovery copy?",
+                "Restore the verified backup to a separate folder, upgrade that copy, "
+                "and open it? The original workspace and backup will be kept. "
+                "Future desktop launches will use the recovered copy. Provider keys "
+                "are excluded from backups and may need to be added again.\n\n"
+                f"Recovery folder: {destination}",
+            )
+            or self.cancelled.is_set()
+        ):
+            return False
+        self._recovery_copy_attempted = True
+        self._show_status("Restoring and opening a recovery copy…")
+        restore_backup(failure.backup_path, destination)
+        self._launch_locks.enter_context(workspace_launch_lock(destination))
+        self.context = WorkspaceContext.from_options(destination, environment={})
+        if migration_preflight(self.context)["status"] != "compatible":
+            # The confirmation above authorizes upgrading this separate copy.
+            migrate_workspace_locked(self.context)
+        write_json_atomic(
+            original.paths.root / "desktop-recovery.json",
+            {"format_version": 1, "workspace": destination.name},
+        )
+        self.failed = False
+        self._show_status(f"Recovery copy ready: {destination}")
         return True
 
     def _show_status(self, message: str) -> None:

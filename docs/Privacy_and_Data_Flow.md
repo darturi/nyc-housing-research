@@ -86,6 +86,14 @@ contain the question/evidence or property rows the user selected. Workspace
 backups include user-provided resources so restore is complete. Portable corpus
 bundles contain official core sources only and exclude user resources.
 
+Upgrade recovery uses a separate private local directory containing exact SQLite
+snapshots and a journal. Unlike portable backups, these temporary snapshots can
+include local sessions and cached property data. They remain on the user's machine
+and are deleted after successful upgrade/recovery cleanup; interrupted preparation
+or cleanup can leave private staging folders. Never include these folders in a
+support report. A desktop recovery copy comes from the sanitized portable ZIP,
+gets a new workspace identity, and does not inherit provider credentials.
+
 Answer evaluation persists a report only when `--report PATH` is explicitly
 supplied (shell redirection can also persist command output). These reports
 contain questions, answers, evidence excerpts, source provenance, and profile
