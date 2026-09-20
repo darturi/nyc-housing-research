@@ -46,12 +46,18 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/launcher-python
-      UV_CACHE_DIR: ${{ runner.temp }}/launcher-cache
       UV_MANAGED_PYTHON: "1"
       NYC_HOUSING_CONFIG: ""
     steps:
       - uses: actions/checkout@v4
+      - name: Configure runner-local launcher paths
+        shell: bash
+        env:
+          CI_UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/launcher-python
+          CI_UV_CACHE_DIR: ${{ runner.temp }}/launcher-cache
+        run: |
+          printf '%s\n' "UV_PYTHON_INSTALL_DIR=$CI_UV_PYTHON_INSTALL_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' "UV_CACHE_DIR=$CI_UV_CACHE_DIR" >> "$GITHUB_ENV"
       # No setup-uv or setup-python: this tests the distribution entry path.
       - name: First and offline repeat launch (macOS/Linux)
         if: runner.os != 'Windows'
@@ -79,12 +85,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      NYC_HOUSING_DATA_DIR: ${{ runner.temp }}/nyc-housing-test-data
-      NYC_HOUSING_CONFIG: ${{ runner.temp }}/nyc-housing-test-config/settings.json
       DATABASE_URL: "sqlite+pysqlite:///:memory:"
       APP_ENV: test
       ARTIFACT_STORAGE_BACKEND: local
-      ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
       EMBEDDING_PROVIDER: fake
       ANSWER_LLM_PROVIDER: fake
       NYC_HOUSING_OPENAI_API_KEY: ""
@@ -95,6 +98,16 @@ jobs:
         with:
           version: "0.11.14"
           enable-cache: true
+      - name: Configure runner-local test paths
+        shell: bash
+        env:
+          CI_DATA_DIR: ${{ runner.temp }}/nyc-housing-test-data
+          CI_CONFIG_PATH: ${{ runner.temp }}/nyc-housing-test-config/settings.json
+          CI_ARTIFACT_PATH: ${{ runner.temp }}/legacy-test-artifacts
+        run: |
+          printf '%s\n' "NYC_HOUSING_DATA_DIR=$CI_DATA_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' "NYC_HOUSING_CONFIG=$CI_CONFIG_PATH" >> "$GITHUB_ENV"
+          printf '%s\n' "ARTIFACT_STORAGE_PATH=$CI_ARTIFACT_PATH" >> "$GITHUB_ENV"
       - name: Install locked Python 3.12 environment
         run: uv sync --locked --extra dev
       - name: Lint
@@ -161,7 +174,6 @@ jobs:
       DATABASE_URL: "sqlite+pysqlite:///:memory:"
       APP_ENV: test
       ARTIFACT_STORAGE_BACKEND: local
-      ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
       EMBEDDING_PROVIDER: fake
       ANSWER_LLM_PROVIDER: fake
     steps:
@@ -171,6 +183,8 @@ jobs:
           version: "0.11.14"
       - run: uv sync --locked
       - run: uv run nyc-housing benchmark --chunks 10000 --dimension 1536 --runs 20 --json
+        env:
+          ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
 
   browser-e2e:
     name: Chromium local journey
@@ -180,7 +194,6 @@ jobs:
       DATABASE_URL: "sqlite+pysqlite:///:memory:"
       APP_ENV: test
       ARTIFACT_STORAGE_BACKEND: local
-      ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
       EMBEDDING_PROVIDER: fake
       ANSWER_LLM_PROVIDER: fake
     steps:
@@ -193,6 +206,8 @@ jobs:
         run: uv run playwright install --with-deps chromium
       - name: Run local browser journey
         run: uv run pytest tests/e2e/test_local_browser.py -q
+        env:
+          ARTIFACT_STORAGE_PATH: ${{ runner.temp }}/legacy-test-artifacts
 
   macos-desktop:
     name: Standalone macOS DMG
