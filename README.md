@@ -226,6 +226,7 @@ to assess the completed judgments. See the
 - [Contributing](docs/Contributing.md)
 - [Third-party and source review inventory](docs/Third_Party_and_Source_Review.md)
 - [Current beta-batch readiness](docs/Release_Readiness/2026-09-20_Beta_Batch.md)
+- [Recovery and interrupted-upgrade follow-up](docs/Release_Readiness/2026-09-20_Recovery_Batch.md)
 - [Historical L1 acceptance evidence](docs/Release_Readiness/2026-09-14_L1_Acceptance.md)
 - [L1 requirement-by-requirement audit](docs/Release_Readiness/2026-09-15_L1_Requirement_Audit.md)
 
@@ -237,9 +238,10 @@ entry path. Its runbooks are marked historical and are not the local quickstart.
 The local implementation is a release candidate. macOS arm64 and a built wheel
 have been exercised locally; the repository includes native Linux, macOS, and
 Windows CI and a configured GitHub remote. Successful CI evidence must be tied to
-the final release revision; the workflow definition alone is not a passing run. The five-source installer and bounded HPD connector have been
-live-verified; paid-answer, domain-review, parity, and independent clean-machine
-gates are recorded transparently in the acceptance report.
+the final release revision; the workflow definition alone is not a passing run.
+The five-source installer and bounded HPD connector have been live-verified;
+paid-answer, domain-review, parity, and independent clean-machine gates are
+recorded transparently in the acceptance report.
 
 The original source code and documentation in this repository are licensed under
 the [Apache License 2.0](LICENSE). Unless expressly stated otherwise, that license
